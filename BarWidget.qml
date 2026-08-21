@@ -66,6 +66,9 @@ Panel {
         source: Qt.resolvedUrl("icon.svg")
         fillMode: Image.PreserveAspectFit
         sourceSize: Qt.size(button.opticalSize, button.opticalSize)
+        anchors.centerIn: parent
+        width: button.opticalSize
+        height: button.opticalSize
       }
     }
 

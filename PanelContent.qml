@@ -90,24 +90,31 @@ Item {
     running: false
     property string _output: ""
 
-    onRunningChanged: {
-      if (!running) {
-        root._loading = false;
-        if (exitCode === 0 && _output.trim()) {
-          try {
-            var parsed = JSON.parse(_output.trim());
-            if (Array.isArray(parsed)) {
-              root.units = parsed;
-              // Tag scope
-              for (var i = 0; i < parsed.length; i++) {
-                parsed[i].scope = root.scope;
-              }
-              root._applyFilters();
+    onExited: function(exitCode) {
+      root._loading = false;
+      if (exitCode === 0 && _output.trim()) {
+        try {
+          var parsed = JSON.parse(_output.trim());
+          if (Array.isArray(parsed)) {
+            root.units = parsed;
+            // Tag scope
+            for (var i = 0; i < parsed.length; i++) {
+              parsed[i].scope = root.scope;
             }
-          } catch (e) {
-            // JSON parse error, ignore
+            root._applyFilters();
           }
+        } catch (e) {
+          // JSON parse error, ignore
         }
+      }
+      _output = "";
+    }
+
+    onRunningChanged: {
+      // Failed process starts do not emit exited, but must not leave the
+      // panel in its loading state.
+      if (!running && root._loading) {
+        root._loading = false;
         _output = "";
       }
     }
@@ -602,14 +609,12 @@ Item {
       property string _output: ""
       stdout: SplitParser { onRead: function(line) { detailPropsProc._output += line + "\n"; } }
       stderr: SplitParser { onRead: function(line) {} }
-      onRunningChanged: {
-        if (!running) {
-          if (exitCode === 0 && _output.trim()) {
-            detail.unitProps = Model.parseShowOutput(_output);
-            detail.propsLoaded = true;
-          }
-          _output = "";
+      onExited: function(exitCode) {
+        if (exitCode === 0 && _output.trim()) {
+          detail.unitProps = Model.parseShowOutput(_output);
+          detail.propsLoaded = true;
         }
+        _output = "";
       }
     }
 
@@ -733,22 +738,30 @@ Item {
           rowSpacing: Style.spacing.sm
 
           PanelActionButton {
-            text: "Start"
+            iconText: "\uf04b"
+            tooltipText: "Start"
+            focusable: true
             onClicked: detail.actionRequested("startUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Stop"
+            iconText: "\uf04d"
+            tooltipText: "Stop"
+            focusable: true
             onClicked: detail.actionRequested("stopUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Restart"
+            iconText: "\uf021"
+            tooltipText: "Restart"
+            focusable: true
             onClicked: detail.actionRequested("restartUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Reload"
+            iconText: "\uf2f9"
+            tooltipText: "Reload"
+            focusable: true
             visible: detail.unitProps.CanReload !== "no"
             onClicked: detail.actionRequested("reloadUnit", detail.unitName, detail.unitScope)
           }
@@ -756,27 +769,37 @@ Item {
           Item { width: 1; height: 1 } // spacer
 
           PanelActionButton {
-            text: "Enable"
+            iconText: "\uf00c"
+            tooltipText: "Enable"
+            focusable: true
             onClicked: detail.actionRequested("enableUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Disable"
+            iconText: "\uf00d"
+            tooltipText: "Disable"
+            focusable: true
             onClicked: detail.actionRequested("disableUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Reenable"
+            iconText: "\uf2f9"
+            tooltipText: "Reenable"
+            focusable: true
             onClicked: detail.actionRequested("reenableUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Mask"
+            iconText: "\uf023"
+            tooltipText: "Mask"
+            focusable: true
             onClicked: detail.actionRequested("maskUnit", detail.unitName, detail.unitScope)
           }
 
           PanelActionButton {
-            text: "Unmask"
+            iconText: "\uf09c"
+            tooltipText: "Unmask"
+            focusable: true
             onClicked: detail.actionRequested("unmaskUnit", detail.unitName, detail.unitScope)
           }
         }

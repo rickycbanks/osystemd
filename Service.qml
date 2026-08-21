@@ -60,8 +60,7 @@ Item {
     var json = JSON.stringify(root.preferences, null, 2);
     // Write via Process to avoid FileView read-write conflicts
     var dir = root.configPath.substring(0, root.configPath.lastIndexOf("/"));
-    prefsWriteProc.command = ["sh", "-c", "mkdir -p \"" + dir + "\" && cat > \"" + root.configPath + "\""];
-    prefsWriteProc.stdinData = json;
+    prefsWriteProc.command = ["sh", "-c", "mkdir -p \"$1\" && printf '%s' \"$2\" > \"$3\"", "sh", dir, json, root.configPath];
     prefsWriteProc.running = true;
   }
 
@@ -158,8 +157,8 @@ Item {
     repeat: false
     onTriggered: {
       // Action timed out — kill the process
-      actionProc.kill();
-      root._finishAction(false, "Action timed out");
+      actionProc._forcedFailureMessage = "Action timed out";
+      actionProc.signal(9); // SIGKILL
     }
   }
 
@@ -168,8 +167,8 @@ Item {
     interval: 120000
     repeat: false
     onTriggered: {
-      actionProc.kill();
-      root._finishAction(false, "System action timed out");
+      actionProc._forcedFailureMessage = "System action timed out";
+      actionProc.signal(9); // SIGKILL
     }
   }
 
@@ -255,13 +254,23 @@ Item {
     }
 
     property string _lastActionStderr: ""
+    property string _forcedFailureMessage: ""
+
+    onExited: function(exitCode) {
+      var forcedFailure = _forcedFailureMessage;
+      var ok = forcedFailure === "" && exitCode === 0;
+      var msg = ok ? "" : (forcedFailure || _lastActionStderr.trim() || ("Exit code " + exitCode));
+      _lastActionStderr = "";
+      _forcedFailureMessage = "";
+      root._finishAction(ok, msg);
+    }
 
     onRunningChanged: {
-      if (!running) {
-        var ok = exitCode === 0;
-        var msg = ok ? "" : (_lastActionStderr.trim() || ("Exit code " + exitCode));
+      // Process failures before start do not emit exited.
+      if (!running && root._actionRunning) {
         _lastActionStderr = "";
-        root._finishAction(ok, msg);
+        _forcedFailureMessage = "";
+        root._finishAction(false, "Failed to start systemctl");
       }
     }
   }
@@ -277,8 +286,7 @@ Item {
     property string _filesOutput: ""
     property string _currentSection: "units"
 
-    onRunningChanged: {
-      if (!running) {
+    onExited: function(exitCode) {
         if (exitCode === 0 || exitCode === 1) {
           var unitsJson = Model.parseJsonLines(_unitsOutput);
           var filesJson = Model.parseJsonLines(_filesOutput);
@@ -298,7 +306,6 @@ Item {
         _unitsOutput = "";
         _filesOutput = "";
         _currentSection = "units";
-      }
     }
 
     stdout: SplitParser {
@@ -324,8 +331,7 @@ Item {
     property string _filesOutput: ""
     property string _currentSection: "units"
 
-    onRunningChanged: {
-      if (!running) {
+    onExited: function(exitCode) {
         if (exitCode === 0 || exitCode === 1) {
           var unitsJson = Model.parseJsonLines(_unitsOutput);
           var filesJson = Model.parseJsonLines(_filesOutput);
@@ -345,7 +351,6 @@ Item {
         _unitsOutput = "";
         _filesOutput = "";
         _currentSection = "units";
-      }
     }
 
     stdout: SplitParser {
@@ -418,16 +423,14 @@ Item {
       onRead: function(line) {}
     }
 
-    onRunningChanged: {
-      if (!running) {
-        var props = {};
-        if (exitCode === 0) {
-          props = Model.parseShowOutput(_output);
-        }
-        root._showCache[_unitName + ":" + _scope] = props;
-        root.propertiesLoaded(_unitName, _scope, props);
-        _output = "";
+    onExited: function(exitCode) {
+      var props = {};
+      if (exitCode === 0) {
+        props = Model.parseShowOutput(_output);
       }
+      root._showCache[_unitName + ":" + _scope] = props;
+      root.propertiesLoaded(_unitName, _scope, props);
+      _output = "";
     }
   }
 
