@@ -2,13 +2,16 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import Quickshell
-import qs.Ui
+import qs.Commons
 import "Model.js" as Model
 
 /// Main management panel content: header filters + split unit list / detail.
 ColumnLayout {
     id: root
     spacing: 0
+
+    readonly property color _warnColor: "#e0a040"
+    readonly property color _successColor: "#80c080"
 
     // ── State ──────────────────────────────────────────────────────────
     property int currentTab: 0  // 0=Status, 1=Actions, 2=UnitFile, 3=Journal
@@ -19,13 +22,13 @@ ColumnLayout {
     Rectangle {
         Layout.fillWidth: true
         Layout.preferredHeight: 56
-        color: Color.surface
-        radius: Style.radius
+        color: Color.popups.background
+        radius: Style.cornerRadius
 
         RowLayout {
             anchors.fill: parent
-            anchors.margins: Style.padding
-            spacing: Style.padding
+            anchors.margins: Style.spacing.panelPadding
+            spacing: Style.spacing.panelPadding
 
             // Scope toggle
             Row {
@@ -37,14 +40,14 @@ ColumnLayout {
                         height: 28
                         radius: 4
                         color: Service.scope === modelData ? Color.accent : "transparent"
-                        border.color: Service.scope === modelData ? Color.accent : Color.textMuted
+                        border.color: Service.scope === modelData ? Color.accent : Color.muted
                         border.width: 1
                         Text {
                             id: scopeLabelTxt
                             anchors.centerIn: parent
                             text: Model.scopeLabel(modelData)
-                            font.pixelSize: Style.fontSize
-                            color: Service.scope === modelData ? "#ffffff" : Color.text
+                            font.pixelSize: Style.font.body
+                            color: Service.scope === modelData ? "#ffffff" : Color.foreground
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -59,15 +62,15 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 30
                 radius: 4
-                color: Color.bg
-                border.color: Color.textMuted
+                color: Color.background
+                border.color: Color.muted
                 border.width: 1
                 TextInput {
                     id: searchInput
                     anchors.fill: parent
                     anchors.margins: 6
-                    font.pixelSize: Style.fontSize
-                    color: Color.text
+                    font.pixelSize: Style.font.body
+                    color: Color.foreground
                     clip: true
                     selectByMouse: true
                     text: Service.searchQuery
@@ -76,8 +79,8 @@ ColumnLayout {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: !searchInput.text && !searchInput.activeFocus
                         text: "Search units..."
-                        font.pixelSize: Style.fontSize
-                        color: Color.textMuted
+                        font.pixelSize: Style.font.body
+                        color: Color.muted
                     }
                 }
             }
@@ -85,13 +88,13 @@ ColumnLayout {
             // Refresh button
             Rectangle {
                 width: 28; height: 28; radius: 4
-                color: refreshArea.containsMouse ? Color.surface : "transparent"
-                border.color: Color.textMuted; border.width: 1
+                color: refreshArea.containsMouse ? Color.popups.background : "transparent"
+                border.color: Color.muted; border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "\u21BB"
-                    font.pixelSize: Style.fontSize
-                    color: Color.text
+                    font.pixelSize: Style.font.body
+                    color: Color.foreground
                 }
                 MouseArea {
                     id: refreshArea
@@ -104,13 +107,13 @@ ColumnLayout {
             // Settings button (placeholder)
             Rectangle {
                 width: 28; height: 28; radius: 4
-                color: settingsArea.containsMouse ? Color.surface : "transparent"
-                border.color: Color.textMuted; border.width: 1
+                color: settingsArea.containsMouse ? Color.popups.background : "transparent"
+                border.color: Color.muted; border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "\u2699"
-                    font.pixelSize: Style.fontSize
-                    color: Color.text
+                    font.pixelSize: Style.font.body
+                    color: Color.foreground
                 }
                 MouseArea {
                     id: settingsArea
@@ -130,8 +133,8 @@ ColumnLayout {
 
         Text {
             text: "Type:"
-            font.pixelSize: Style.fontSizeSmall
-            color: Color.textMuted
+            font.pixelSize: Style.font.bodySmall
+            color: Color.muted
         }
         Repeater {
             model: Settings.typeFilter
@@ -140,14 +143,14 @@ ColumnLayout {
                 height: 22
                 radius: 4
                 color: Service.typeFilter.indexOf(modelData) >= 0 ? Color.accent : "transparent"
-                border.color: Service.typeFilter.indexOf(modelData) >= 0 ? Color.accent : Color.textMuted
+                border.color: Service.typeFilter.indexOf(modelData) >= 0 ? Color.accent : Color.muted
                 border.width: 1
                 Text {
                     id: chipText
                     anchors.centerIn: parent
                     text: modelData
-                    font.pixelSize: Style.fontSizeSmall
-                    color: Service.typeFilter.indexOf(modelData) >= 0 ? "#ffffff" : Color.textMuted
+                    font.pixelSize: Style.font.bodySmall
+                    color: Service.typeFilter.indexOf(modelData) >= 0 ? "#ffffff" : Color.muted
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -166,8 +169,8 @@ ColumnLayout {
 
         Text {
             text: "State:"
-            font.pixelSize: Style.fontSizeSmall
-            color: Color.textMuted
+            font.pixelSize: Style.font.bodySmall
+            color: Color.muted
         }
         Repeater {
             model: Settings.stateFilter
@@ -176,14 +179,14 @@ ColumnLayout {
                 height: 22
                 radius: 4
                 color: Service.stateFilter.indexOf(modelData) >= 0 ? Color.accent : "transparent"
-                border.color: Service.stateFilter.indexOf(modelData) >= 0 ? Color.accent : Color.textMuted
+                border.color: Service.stateFilter.indexOf(modelData) >= 0 ? Color.accent : Color.muted
                 border.width: 1
                 Text {
                     id: stateChipText
                     anchors.centerIn: parent
                     text: modelData
-                    font.pixelSize: Style.fontSizeSmall
-                    color: Service.stateFilter.indexOf(modelData) >= 0 ? "#ffffff" : Color.textMuted
+                    font.pixelSize: Style.font.bodySmall
+                    color: Service.stateFilter.indexOf(modelData) >= 0 ? "#ffffff" : Color.muted
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -204,15 +207,15 @@ ColumnLayout {
         Text {
             visible: Service.busy
             text: "Loading..."
-            font.pixelSize: Style.fontSizeSmall
+            font.pixelSize: Style.font.bodySmall
             color: Color.accent
         }
 
         // Summary
         Text {
             text: Model.failedSummary(Service.failedCount, Service.scope)
-            font.pixelSize: Style.fontSizeSmall
-            color: Service.failedCount > 0 ? Color.error : Color.textMuted
+            font.pixelSize: Style.font.bodySmall
+            color: Service.failedCount > 0 ? Color.urgent : Color.muted
         }
     }
 
@@ -227,8 +230,8 @@ ColumnLayout {
         // ── LEFT: Unit list ────────────────────────────────────────────
         Rectangle {
             SplitView.preferredWidth: 360
-            color: Color.bg
-            radius: Style.radius
+            color: Color.background
+            radius: Style.cornerRadius
 
             ListView {
                 id: unitList
@@ -259,8 +262,8 @@ ColumnLayout {
                         // Type icon (Unicode by suffix)
                         Text {
                             text: _typeIcon(modelData.type)
-                            font.pixelSize: Style.fontSize
-                            color: Color.textMuted
+                            font.pixelSize: Style.font.body
+                            color: Color.muted
                             Layout.preferredWidth: 20
                             horizontalAlignment: Text.AlignHCenter
                         }
@@ -271,16 +274,16 @@ ColumnLayout {
                             spacing: 0
                             Text {
                                 text: modelData.name
-                                font.pixelSize: Style.fontSize
+                                font.pixelSize: Style.font.body
                                 font.bold: unitList.currentIndex === unitDelegate.index
-                                color: Color.text
+                                color: Color.foreground
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
                             Text {
                                 text: modelData.description || ""
-                                font.pixelSize: Style.fontSizeSmall
-                                color: Color.textMuted
+                                font.pixelSize: Style.font.bodySmall
+                                color: Color.muted
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                                 maximumLineCount: 1
@@ -295,10 +298,10 @@ ColumnLayout {
                             color: {
                                 var key = Model.stateColorKey(
                                     Model.normalizeState(modelData.active, modelData.sub));
-                                if (key === "success") return Color.success;
-                                if (key === "error") return Color.error;
-                                if (key === "warn") return Color.warn;
-                                return Color.textMuted;
+                                if (key === "success") return _successColor;
+                                if (key === "error") return Color.urgent;
+                                if (key === "warn") return _warnColor;
+                                return Color.muted;
                             }
                             Text {
                                 id: badgeText
@@ -332,8 +335,8 @@ ColumnLayout {
         // ── RIGHT: Detail pane ─────────────────────────────────────────
         Rectangle {
             SplitView.fillWidth: true
-            color: Color.bg
-            radius: Style.radius
+            color: Color.background
+            radius: Style.cornerRadius
 
             ColumnLayout {
                 anchors.fill: parent
@@ -351,14 +354,14 @@ ColumnLayout {
                             width: tabLabel.implicitWidth + 20
                             height: 32
                             radius: 4
-                            color: root.currentTab === index ? Color.surface : "transparent"
+                            color: root.currentTab === index ? Color.popups.background : "transparent"
                             Text {
                                 id: tabLabel
                                 anchors.centerIn: parent
                                 text: modelData
-                                font.pixelSize: Style.fontSize
+                                font.pixelSize: Style.font.body
                                 font.bold: root.currentTab === index
-                                color: root.currentTab === index ? Color.accent : Color.textMuted
+                                color: root.currentTab === index ? Color.accent : Color.muted
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -373,7 +376,7 @@ ColumnLayout {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 1
-                    color: Color.textMuted
+                    color: Color.muted
                 }
 
                 // ── Tab content ────────────────────────────────────────
@@ -394,8 +397,8 @@ ColumnLayout {
                             Text {
                                 visible: !Service.selectedUnit
                                 text: "Select a unit from the list"
-                                font.pixelSize: Style.fontSize
-                                color: Color.textMuted
+                                font.pixelSize: Style.font.body
+                                color: Color.muted
                                 Layout.margins: 8
                             }
 
@@ -408,15 +411,15 @@ ColumnLayout {
 
                                     Text {
                                         text: modelData.key
-                                        font.pixelSize: Style.fontSizeSmall
+                                        font.pixelSize: Style.font.bodySmall
                                         font.bold: true
-                                        color: Color.textMuted
+                                        color: Color.muted
                                         Layout.preferredWidth: 140
                                     }
                                     Text {
                                         text: modelData.value || "\u2014"
-                                        font.pixelSize: Style.fontSize
-                                        color: Color.text
+                                        font.pixelSize: Style.font.body
+                                        color: Color.foreground
                                         Layout.fillWidth: true
                                         wrapMode: Text.Wrap
                                     }
@@ -433,24 +436,24 @@ ColumnLayout {
                         Text {
                             visible: !Service.selectedUnit
                             text: "Select a unit from the list"
-                            font.pixelSize: Style.fontSize
-                            color: Color.textMuted
+                            font.pixelSize: Style.font.body
+                            color: Color.muted
                         }
 
                         Text {
                             visible: Service.selectedUnit !== ""
                             text: Service.selectedUnit
-                            font.pixelSize: Style.fontSize
+                            font.pixelSize: Style.font.body
                             font.bold: true
-                            color: Color.text
+                            color: Color.foreground
                         }
 
                         // Warning for system scope without elevation
                         Text {
                             visible: Service.scope === "system" && !Service.canElevate
                             text: "pkexec not available \u2014 system mutations will fail"
-                            font.pixelSize: Style.fontSizeSmall
-                            color: Color.warn
+                            font.pixelSize: Style.font.bodySmall
+                            color: _warnColor
                         }
 
                         // Action buttons in a grid
@@ -479,15 +482,15 @@ ColumnLayout {
                                         model.action, model.needsActive)
                                     color: {
                                         if (!btnEnabled) return Qt.rgba(1, 1, 1, 0.05);
-                                        return btnMouseArea.containsMouse ? Color.accent : Color.surface;
+                                        return btnMouseArea.containsMouse ? Color.accent : Color.popups.background;
                                     }
-                                    border.color: Color.textMuted
+                                    border.color: Color.muted
                                     border.width: 1
                                     Text {
                                         anchors.centerIn: parent
                                         text: model.label
-                                        font.pixelSize: Style.fontSize
-                                        color: btnEnabled ? Color.text : Color.textMuted
+                                        font.pixelSize: Style.font.body
+                                        color: btnEnabled ? Color.foreground : Color.muted
                                     }
                                     MouseArea {
                                         id: btnMouseArea
@@ -513,8 +516,8 @@ ColumnLayout {
                             Text {
                                 visible: !Service.selectedUnit
                                 text: "Select a unit from the list"
-                                font.pixelSize: Style.fontSize
-                                color: Color.textMuted
+                                font.pixelSize: Style.font.body
+                                color: Color.muted
                                 Layout.margins: 8
                             }
 
@@ -525,15 +528,15 @@ ColumnLayout {
                                     spacing: 2
                                     Text {
                                         text: modelData.path
-                                        font.pixelSize: Style.fontSizeSmall
+                                        font.pixelSize: Style.font.bodySmall
                                         font.family: "monospace"
                                         color: Color.accent
                                     }
                                     Text {
                                         text: modelData.content
-                                        font.pixelSize: Style.fontSizeSmall
+                                        font.pixelSize: Style.font.bodySmall
                                         font.family: "monospace"
-                                        color: Color.text
+                                        color: Color.foreground
                                         wrapMode: Text.Wrap
                                         Layout.fillWidth: true
                                     }
@@ -544,8 +547,8 @@ ColumnLayout {
                             Text {
                                 visible: Service.selectedUnit !== "" && _fileSections().length === 0
                                 text: "No unit file content available"
-                                font.pixelSize: Style.fontSize
-                                color: Color.textMuted
+                                font.pixelSize: Style.font.body
+                                color: Color.muted
                             }
                         }
                     }
@@ -562,13 +565,13 @@ ColumnLayout {
 
                             Rectangle {
                                 width: 24; height: 24; radius: 4
-                                color: journalRefreshArea.containsMouse ? Color.surface : "transparent"
-                                border.color: Color.textMuted; border.width: 1
+                                color: journalRefreshArea.containsMouse ? Color.popups.background : "transparent"
+                                border.color: Color.muted; border.width: 1
                                 Text {
                                     anchors.centerIn: parent
                                     text: "\u21BB"
-                                    font.pixelSize: Style.fontSize
-                                    color: Color.text
+                                    font.pixelSize: Style.font.body
+                                    color: Color.foreground
                                 }
                                 MouseArea {
                                     id: journalRefreshArea
@@ -580,8 +583,8 @@ ColumnLayout {
                             }
                             Text {
                                 text: "Journal \u2014 " + (Service.selectedUnit || "(none)")
-                                font.pixelSize: Style.fontSizeSmall
-                                color: Color.textMuted
+                                font.pixelSize: Style.font.bodySmall
+                                color: Color.muted
                             }
                             Item { Layout.fillWidth: true }
                         }
@@ -589,7 +592,7 @@ ColumnLayout {
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 1
-                            color: Color.textMuted
+                            color: Color.muted
                         }
 
                         ListView {
@@ -604,9 +607,9 @@ ColumnLayout {
                                 required property int index
                                 width: journalList.width
                                 text: modelData
-                                font.pixelSize: Style.fontSizeSmall
+                                font.pixelSize: Style.font.bodySmall
                                 font.family: "monospace"
-                                color: Color.text
+                                color: Color.foreground
                                 wrapMode: Text.Wrap
                             }
 

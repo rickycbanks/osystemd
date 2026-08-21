@@ -2,12 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
-import qs.Ui
+import qs.Commons
 import "Model.js" as Model
 
 /// Bar-widget entry point: compact indicator dot + optional failed count.
 Item {
     id: root
+    readonly property color _warnColor: "#e0a040"
+    readonly property color _successColor: "#80c080"
     implicitWidth: 24
     implicitHeight: 24
 
@@ -20,9 +22,9 @@ Item {
         radius: 5
         color: {
             var key = Model.indicatorColor(Service.failedCount, Service.lastError);
-            if (key === "error") return Color.error;
-            if (key === "warn") return Color.warn;
-            return Color.success;
+            if (key === "error") return Color.urgent;
+            if (key === "warn") return _warnColor;
+            return _successColor;
         }
 
         // Pulse animation on failure
@@ -50,9 +52,9 @@ Item {
         anchors.verticalCenter: dot.verticalCenter
         visible: Service.failedCount > 0
         text: String(Service.failedCount)
-        font.pixelSize: Style.fontSizeSmall
+        font.pixelSize: Style.font.bodySmall
         font.bold: true
-        color: Color.error
+        color: Color.urgent
     }
 
     // ── Tooltip on hover ───────────────────────────────────────────────
@@ -67,6 +69,6 @@ Item {
         id: hoverArea
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: Service.togglePanel()
+        onClicked: Service.openPanel(root)
     }
 }

@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.Ui
 import "Model.js" as Model
 
 pragma Singleton
@@ -23,6 +22,7 @@ Singleton {
     property bool canElevate: false
     property var lastUpdated: null
     property bool panelVisible: false
+    property var panelAnchor: null   // Item, the bar button that triggered the panel
     property string helperPath: ""
 
     // ── Derived: filtered + sorted unit list ───────────────────────────
@@ -63,9 +63,12 @@ Singleton {
     }
 
     // ── IPC: Panel visibility ──────────────────────────────────────────
-    function togglePanel() { panelVisible = !panelVisible; }
-    function openPanel()   { panelVisible = true; }
-    function closePanel()  { panelVisible = false; }
+    function togglePanel(anchorItem) {
+        if (panelVisible) { panelVisible = false; }
+        else { openPanel(anchorItem); }
+    }
+    function openPanel(anchorItem)   { panelAnchor = anchorItem || null; panelVisible = true; }
+    function closePanel()  { panelAnchor = null; panelVisible = false; }
 
     // ── IPC: Refresh unit list ────────────────────────────────────────
     function refresh() {
