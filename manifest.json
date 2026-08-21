@@ -8,7 +8,7 @@
   "description": "Manage systemd units from the Omarchy bar. List, inspect, start/stop, enable/disable, mask, and view unit files and journals. Supports user and system scope with polkit elevation.",
   "kinds": ["bar-widget", "service"],
   "entryPoints": {
-    "bar-widget": "BarWidget.qml",
+    "barWidget": "BarWidget.qml",
     "service": "Service.qml"
   }
 }
