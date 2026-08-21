@@ -23,7 +23,7 @@ Singleton {
     property bool canElevate: false
     property var lastUpdated: null
     property bool panelVisible: false
-    property string helperPath: Quickshell.shellDir + "/units.py"
+    property string helperPath: ""
 
     // ── Derived: filtered + sorted unit list ───────────────────────────
     property var filteredUnits: {
@@ -251,6 +251,8 @@ Singleton {
 
     // ── Bootstrap ──────────────────────────────────────────────────────
     Component.onCompleted: {
+        helperPath = Qt.urlToLocalFile(Qt.resolvedUrl(Qt.url("./units.py")));
+
         // Run diagnose once to populate canElevate
         diagnoseProc.commands = [["python3", helperPath, "diagnose"]];
         diagnoseProc.running = true;
