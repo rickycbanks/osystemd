@@ -57,8 +57,11 @@ Panel {
   BarIconButton {
     id: button
     bar: root.bar
-    text: root.hasFailed ? "\uf36b" : "\uf4d3"  // 󰾓 if failed, 󰒓 normal
-    color: root.hasFailed ? Color.urgent : Color.foreground
+    // ⚙ U+2699 gear — plain Unicode, works without nerd-font
+    text: "⚙"
+    // foreground (not "color"): WidgetButton's icon color lives on `foreground`,
+    // which feeds OpticalGlyph.color via root.foreground.
+    foreground: root.hasFailed ? Color.urgent : Color.foreground
 
     onPressed: function(b) {
       if (b === Qt.LeftButton) {
@@ -112,10 +115,10 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
-                text: root.hasFailed ? "\uf36b" : "\uf4d3"
-                font.family: "Symbols Nerd Font"
+                // ⚙ U+2699 gear — plain Unicode, works without nerd-font
+                text: "⚙"
                 font.pixelSize: Style.font.iconLarge
-                color: root.hasFailed ? Color.urgent : Color.accent
+                color: root.hasFailed ? Color.urgent : Color.foreground
                 anchors.verticalCenter: parent.verticalCenter
               }
 
