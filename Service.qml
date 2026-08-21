@@ -85,7 +85,7 @@ Singleton {
             args.push("--filter");
             args.push(searchQuery);
         }
-        listProc.commands = [["python3", helperPath].concat(args)];
+        listProc.command = ["python3", helperPath].concat(args);
         listProc.running = true;
     }
 
@@ -114,7 +114,7 @@ Singleton {
             "journal": journalProc
         };
         var proc = procs[tab] || detailProc;
-        proc.commands = [["python3", helperPath].concat(args)];
+        proc.command = ["python3", helperPath].concat(args);
         proc.running = true;
     }
 
@@ -135,7 +135,7 @@ Singleton {
         busy = true;
         lastError = "";
         var args = [action, unit, "--scope", scope];
-        mutateProc.commands = [["python3", helperPath].concat(args)];
+        mutateProc.command = ["python3", helperPath].concat(args);
         mutateProc.running = true;
     }
 
@@ -144,7 +144,7 @@ Singleton {
         busy = true;
         lastError = "";
         var args = ["daemon-reload", "--scope", scope];
-        mutateProc.commands = [["python3", helperPath].concat(args)];
+        mutateProc.command = ["python3", helperPath].concat(args);
         mutateProc.running = true;
     }
 
@@ -254,7 +254,7 @@ Singleton {
         helperPath = Qt.urlToLocalFile(Qt.resolvedUrl(Qt.url("./units.py")));
 
         // Run diagnose once to populate canElevate
-        diagnoseProc.commands = [["python3", helperPath, "diagnose"]];
+        diagnoseProc.command = ["python3", helperPath, "diagnose"];
         diagnoseProc.running = true;
 
         // Start periodic refresh
