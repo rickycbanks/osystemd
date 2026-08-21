@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import qs.Commons
+import osystemd
 import "Model.js" as Model
 
 /// Bar-widget entry point: compact indicator dot + optional failed count.

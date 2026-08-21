@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import osystemd
 
 /// PopupWindow shell for the systemd management panel.
 /// Hosts PanelContent and handles Escape to close.
