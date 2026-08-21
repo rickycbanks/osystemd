@@ -57,8 +57,9 @@ Panel {
   BarIconButton {
     id: button
     bar: root.bar
-    // ⚙ U+2699 gear — plain Unicode, works without nerd-font
-    text: "⚙"
+    // 󰋛 U+F02DB Nerd Font service / database icon
+    // (plain Unicode won't render — bar font is JetBrainsMono Nerd Font, PUA-only for icons)
+    text: "󰋛"
     // foreground (not "color"): WidgetButton's icon color lives on `foreground`,
     // which feeds OpticalGlyph.color via root.foreground.
     foreground: root.hasFailed ? Color.urgent : Color.foreground
@@ -115,8 +116,8 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
-                // ⚙ U+2699 gear — plain Unicode, works without nerd-font
-                text: "⚙"
+                // 󰋛 U+F02DB Nerd Font service / database icon
+                text: "󰋛"
                 font.pixelSize: Style.font.iconLarge
                 color: root.hasFailed ? Color.urgent : Color.foreground
                 anchors.verticalCenter: parent.verticalCenter
