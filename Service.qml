@@ -40,9 +40,9 @@ Item {
     path: root.configPath
     printErrors: false
 
-    onContentLoaded: {
+    onLoaded: {
       try {
-        var data = JSON.parse(text);
+        var data = JSON.parse(text());
         for (var k in data) {
           if (k === "favorites") {
             root.preferences.favorites = data[k];

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -65,7 +66,6 @@ Panel {
         source: Qt.resolvedUrl("icon.svg")
         fillMode: Image.PreserveAspectFit
         sourceSize: Qt.size(button.opticalSize, button.opticalSize)
-        color: root.hasFailed ? Color.urgent : Color.foreground
       }
     }
 
@@ -126,7 +126,6 @@ Panel {
                 sourceSize: Qt.size(Style.font.iconLarge, Style.font.iconLarge)
                 width: Style.font.iconLarge
                 height: Style.font.iconLarge
-                color: root.hasFailed ? Color.urgent : Color.foreground
                 anchors.verticalCenter: parent.verticalCenter
               }
 
