@@ -57,12 +57,17 @@ Panel {
   BarIconButton {
     id: button
     bar: root.bar
-    // 󰋛 U+F02DB Nerd Font service / database icon
-    // (plain Unicode won't render — bar font is JetBrainsMono Nerd Font, PUA-only for icons)
-    text: "󰋛"
-    // foreground (not "color"): WidgetButton's icon color lives on `foreground`,
-    // which feeds OpticalGlyph.color via root.foreground.
-    foreground: root.hasFailed ? Color.urgent : Color.foreground
+    // Inline SVG gear icon — renders regardless of font configuration.
+    // iconComponent bypasses OpticalGlyph entirely; the Loader in
+    // BarIconButton renders this Image inside the optical-canvas Item.
+    iconComponent: Component {
+      Image {
+        source: Qt.resolvedUrl("icon.svg")
+        fillMode: Image.PreserveAspectFit
+        sourceSize: Qt.size(button.opticalSize, button.opticalSize)
+        color: root.hasFailed ? Color.urgent : Color.foreground
+      }
+    }
 
     onPressed: function(b) {
       if (b === Qt.LeftButton) {
@@ -115,10 +120,12 @@ Panel {
               spacing: Style.spacing.md
               anchors.verticalCenter: parent.verticalCenter
 
-              Text {
-                // 󰋛 U+F02DB Nerd Font service / database icon
-                text: "󰋛"
-                font.pixelSize: Style.font.iconLarge
+              Image {
+        source: Qt.resolvedUrl("icon.svg")
+                fillMode: Image.PreserveAspectFit
+                sourceSize: Qt.size(Style.font.iconLarge, Style.font.iconLarge)
+                width: Style.font.iconLarge
+                height: Style.font.iconLarge
                 color: root.hasFailed ? Color.urgent : Color.foreground
                 anchors.verticalCenter: parent.verticalCenter
               }
