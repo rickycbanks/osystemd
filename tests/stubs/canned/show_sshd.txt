@@ -1,0 +1,17 @@
+LoadState=loaded
+ActiveState=active
+SubState=running
+Description=OpenBSD Secure Shell server daemon
+MainPID=1234
+ExecMainPID=1234
+ExecMainStartTimestamp=Mon 2026-01-20 10:15:30 UTC
+FragmentPath=/usr/lib/systemd/system/ssh.service
+UnitFileState=enabled
+UnitFilePreset=enabled
+ActiveEnterTimestamp=Mon 2026-01-20 10:15:30 UTC
+EnvironmentFile=-/etc/default/ssh
+EnvironmentFile=-/etc/sysconfig/sshd
+Restart=on-failure
+RestartSec=5
+Type=notify
+NotifyAccess=main

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.rickycbanks.osystemd",
+  "name": "Systemd",
+  "version": "0.2.0",
+  "author": "Ricky Banks",
+  "license": "MIT",
+  "description": "Manage systemd units from the Omarchy bar. List, inspect, start/stop, enable/disable, mask, and view unit files and journals. Supports user and system scope with polkit elevation.",
+  "kinds": ["bar-widget", "service"],
+  "entryPoints": {
+    "bar-widget": "BarWidget.qml",
+    "service": "Service.qml"
+  }
+}

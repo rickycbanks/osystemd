@@ -1,0 +1,6 @@
+Jan 20 10:15:30 hostname sshd[1234]: Server listening on 0.0.0.0 port 22.
+Jan 20 10:15:30 hostname sshd[1234]: Server listening on :: port 22.
+Jan 20 10:20:15 hostname sshd[1234]: Accepted publickey for user from 192.168.1.100 port 54321 ssh2: RSA SHA256:abcdef
+Jan 20 10:20:15 hostname sshd[1235]: pam_unix(sshd:session): session opened for user by (uid=0)
+Jan 20 10:35:42 hostname sshd[1236]: Disconnected from 192.168.1.200 port 12345 [preauth]
+Jan 20 11:00:00 hostname sshd[1234]: Received disconnect from 192.168.1.100 port 54321:11: disconnected by user

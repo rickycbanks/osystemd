@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.pyo
+tests/.tmp/
+tests/stubs/canned/.pkexec_invocation.txt

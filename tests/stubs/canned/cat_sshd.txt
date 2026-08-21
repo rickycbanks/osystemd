@@ -1,0 +1,19 @@
+# /usr/lib/systemd/system/ssh.service
+[Unit]
+Description=OpenBSD Secure Shell server daemon
+Documentation=man:sshd(8) man:sshd_config(5)
+After=network.target auditd.service
+ConditionPathExistsGlob=/etc/ssh/sshd_config.d/*.conf
+
+[Service]
+Type=notify
+EnvironmentFile=-/etc/default/ssh
+EnvironmentFile=-/etc/sysconfig/sshd
+ExecStartPre=/usr/sbin/sshd -t
+ExecStart=/usr/sbin/sshd -D $SSHD_OPTS
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

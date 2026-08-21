@@ -1,0 +1,12 @@
+UNIT                          LOAD   ACTIVE SUB     DESCRIPTION
+ssh.service                   loaded active running OpenBSD Secure Shell server daemon
+nginx.service                 loaded active running A high performance web server
+cron.service                  loaded active running Regular background program processing
+dbus.service                  loaded active running D-Bus System Message Bus
+polkit.service                loaded active running Authorization Manager
+systemd-journald.service      loaded active running Journal Service
+systemd-logind.service        loaded active running Login Service
+dbus-daemon.service           loaded active running D-Bus System Message Bus
+myservice.service             loaded failed failed  My test service
+notepad.timer                 loaded active waiting Notepad timer
+data.mount                    loaded active mounted Data mount point

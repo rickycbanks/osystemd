@@ -1,0 +1,10 @@
+UNIT                          LOAD   ACTIVE SUB     DESCRIPTION
+ssh.service                   loaded active running OpenBSD Secure Shell server daemon
+nginx.service                 loaded active running A high performance web server
+systemd-resolved.service      loaded active running DNS Stub Resolver
+systemd-networkd.service      loaded active running Network Manager
+udisks2.service               loaded active running Disk Manager
+ModemManager.service          loaded active running Modem Manager
+bluetooth.service             loaded active running Bluetooth service
+fwupd.service                 loaded active running Firmware update daemon
+myservice.service             loaded failed failed  My test system service
