@@ -341,6 +341,7 @@ Panel {
 
                                 delegate: Rectangle {
                                     id: unitDelegate
+                                    required property var model
                                     required property int index
                                     width: unitList.width
                                     height: 48
@@ -358,7 +359,7 @@ Panel {
 
                                         // Type icon
                                         Text {
-                                            text: _typeIcon(modelData.type)
+                                            text: _typeIcon(unitDelegate.model.type)
                                             font.pixelSize: Style.font.body
                                             color: Color.muted
                                             Layout.preferredWidth: 20
@@ -370,7 +371,7 @@ Panel {
                                             Layout.fillWidth: true
                                             spacing: 0
                                             Text {
-                                                text: modelData.name
+                                                text: unitDelegate.model.name
                                                 font.pixelSize: Style.font.body
                                                 font.bold: unitList.currentIndex === unitDelegate.index
                                                 color: Color.foreground
@@ -378,7 +379,7 @@ Panel {
                                                 Layout.fillWidth: true
                                             }
                                             Text {
-                                                text: modelData.description || ""
+                                                text: unitDelegate.model.description || ""
                                                 font.pixelSize: Style.font.bodySmall
                                                 color: Color.muted
                                                 elide: Text.ElideRight
@@ -394,7 +395,7 @@ Panel {
                                             radius: 4
                                             color: {
                                                 var key = Model.stateColorKey(
-                                                    Model.normalizeState(modelData.active, modelData.sub));
+                                                    Model.normalizeState(unitDelegate.model.active, unitDelegate.model.sub));
                                                 if (key === "success") return _successColor;
                                                 if (key === "error") return Color.urgent;
                                                 if (key === "warn") return _warnColor;
@@ -403,7 +404,7 @@ Panel {
                                             Text {
                                                 id: badgeText
                                                 anchors.centerIn: parent
-                                                text: Model.stateBadge(modelData.active, modelData.sub)
+                                                text: Model.stateBadge(unitDelegate.model.active, unitDelegate.model.sub)
                                                 font.pixelSize: 9
                                                 font.bold: true
                                                 color: "#ffffff"
@@ -417,7 +418,7 @@ Panel {
                                         hoverEnabled: true
                                         onClicked: {
                                             unitList.currentIndex = unitDelegate.index;
-                                            root.selectUnit(modelData.name);
+                                            root.selectUnit(unitDelegate.model.name);
                                         }
                                     }
                                 }
@@ -699,9 +700,11 @@ Panel {
                                             model: _journalLines()
 
                                             delegate: Text {
+                                                id: journalLine
+                                                required property var model
                                                 required property int index
                                                 width: journalList.width
-                                                text: modelData
+                                                text: journalLine.model
                                                 font.pixelSize: Style.font.bodySmall
                                                 font.family: "monospace"
                                                 color: Color.foreground
