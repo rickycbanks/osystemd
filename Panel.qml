@@ -341,7 +341,6 @@ Panel {
 
                                 delegate: Rectangle {
                                     id: unitDelegate
-                                    required property var model
                                     required property int index
                                     width: unitList.width
                                     height: 48
@@ -700,7 +699,6 @@ Panel {
                                             model: _journalLines()
 
                                             delegate: Text {
-                                                required property var model
                                                 required property int index
                                                 width: journalList.width
                                                 text: modelData
