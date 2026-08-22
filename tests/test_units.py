@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 # Point at the project root so we can import units.py
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -326,6 +327,75 @@ class TestDiagnose(unittest.TestCase):
         # systemctl should be found since our stub exists
         self.assertTrue(d["systemctl"])
         self.assertTrue(d["journalctl"])
+
+    def test_diagnose_reports_polkit_agent_field(self):
+        data, ec = _run_units("diagnose")
+        self.assertEqual(ec, 0)
+        d = data["data"]
+        self.assertIn("polkitAgent", d)
+        # polkitAgent should be a bool
+        self.assertIsInstance(d["polkitAgent"], bool)
+
+    def test_diagnose_canElevate_false_when_no_agent(self):
+        """canElevate must be False when pkexec exists but no polkit agent runs."""
+        with unittest.mock.patch.object(units, "_polkit_agent_running", return_value=False):
+            data, ec = _run_units("diagnose")
+            self.assertEqual(ec, 0)
+            d = data["data"]
+            self.assertFalse(d["canElevate"])
+            self.assertFalse(d["polkitAgent"])
+
+    def test_diagnose_canElevate_true_when_agent_running(self):
+        """canElevate must be True when both pkexec and a polkit agent are present."""
+        with unittest.mock.patch.object(units, "_polkit_agent_running", return_value=True):
+            data, ec = _run_units("diagnose")
+            self.assertEqual(ec, 0)
+            d = data["data"]
+            self.assertTrue(d["canElevate"])
+            self.assertTrue(d["polkitAgent"])
+
+    def test_diagnose_canElevate_false_when_pkexec_missing(self):
+        """canElevate must be False when pkexec is not installed."""
+        old = os.environ.get("OSYSTEMD_PKEXEC")
+        os.environ["OSYSTEMD_PKEXEC"] = "/nonexistent/pkexec"
+        try:
+            data, ec = _run_units("diagnose")
+            self.assertEqual(ec, 0)
+            d = data["data"]
+            self.assertFalse(d["pkexec"])
+            self.assertFalse(d["canElevate"])
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_PKEXEC"] = old
+            else:
+                del os.environ["OSYSTEMD_PKEXEC"]
+
+
+class TestTimeoutHandling(unittest.TestCase):
+    """Tests that EXIT_TIMEOUT surfaces as a 'timeout' error code."""
+
+    def test_mutate_timeout_returns_timeout_error(self):
+        with unittest.mock.patch.object(units, "_run", return_value=(units.EXIT_TIMEOUT, "", "")):
+            data, ec = _run_units("start", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 124)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "timeout")
+            self.assertIn("polkit auth agent", data["error"]["message"])
+
+    def test_daemon_reload_timeout_returns_timeout_error(self):
+        with unittest.mock.patch.object(units, "_run", return_value=(units.EXIT_TIMEOUT, "", "")):
+            data, ec = _run_units("daemon-reload", "--scope", "system")
+            self.assertEqual(ec, 124)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "timeout")
+            self.assertIn("polkit auth agent", data["error"]["message"])
+
+    def test_run_checked_timeout_returns_timeout_error(self):
+        with unittest.mock.patch.object(units, "_run", return_value=(units.EXIT_TIMEOUT, "", "")):
+            data, ec = _run_units("status", "ssh.service", "--scope", "user")
+            self.assertEqual(ec, 124)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "timeout")
 
 
 if __name__ == "__main__":

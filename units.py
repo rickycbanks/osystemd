@@ -26,6 +26,11 @@ MUTATION_ACTIONS = frozenset({
     "mask", "unmask", "daemon-reload",
 })
 
+# Sentinel exit codes returned from _run so callers can distinguish
+# "command not found" from "command timed out" from "real non-zero exit".
+EXIT_TIMEOUT = -2
+EXIT_NOT_FOUND = -1
+
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -63,16 +68,35 @@ def _run(cmd):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         return r.returncode, r.stdout, r.stderr
+    except subprocess.TimeoutExpired as exc:
+        # Capture partial output so the panel can show what the command
+        # produced before being killed (helpful when pkexec was hung waiting
+        # for a polkit agent that never appeared).
+        return EXIT_TIMEOUT, (
+            exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        ), (
+            exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        )
     except FileNotFoundError:
-        return None, "", f"{cmd[0]}: not found"
+        return EXIT_NOT_FOUND, "", f"{cmd[0]}: not found"
     except Exception as exc:
-        return None, "", str(exc)
+        return EXIT_NOT_FOUND, "", str(exc)
 
 
 def _run_checked(cmd, scope, action):
     """Run a command; produce JSON envelope on success or the appropriate error."""
     ec, out, err = _run(cmd)
-    if ec is None:
+    if ec == EXIT_TIMEOUT:
+        msg = (
+            f"{action} timed out after 30s — usually means pkexec is waiting for a "
+            f"polkit auth agent that isn't running in this session. Install one "
+            f"(e.g. polkit-gnome) and add an exec-once to start it at login."
+        )
+        return _err(scope, action, "timeout", msg, (err or "").strip()), 124
+    if ec == EXIT_NOT_FOUND:
+        return _err(scope, action, "binary_missing",
+                     f"Binary not found: {cmd[0]}", err), 3
+    if ec is None:  # defensive — should not happen now but preserve old behaviour
         return _err(scope, action, "binary_missing",
                      f"Binary not found: {cmd[0]}", err), 3
     if ec != 0:
@@ -124,9 +148,12 @@ def cmd_list(args, scope):
         cmd.append(f"--state={state_filter}")
 
     ec, out, err = _run(cmd)
-    if ec is None:
+    if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, "list", "binary_missing",
                      f"Binary not found: {_ctl()}", err), 3
+    if ec == EXIT_TIMEOUT:
+        return _err(scope, "list", "timeout",
+                     f"list-units timed out after 30s", (err or "").strip()), 124
     if ec != 0:
         return _err(scope, "list", "command_failed",
                      f"list-units failed (exit {ec})", err.strip()), 1
@@ -296,12 +323,19 @@ def cmd_mutate(action, args, scope):
         cmd.insert(idx, "--user")
 
     ec, out, err = _run(cmd)
-    if ec is None:
+    if ec == EXIT_TIMEOUT:
+        msg = (
+            f"{action} timed out after 30s — usually means pkexec is waiting for "
+            f"a polkit auth agent that isn't running in this session. Install "
+            f"polkit-gnome and start it via Hyprland exec-once."
+        )
+        return _err(scope, action, "timeout", msg, (err or "").strip()), 124
+    if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, action, "binary_missing",
                      f"Binary not found: {cmd[0]}", err), 3
     if ec != 0:
         return _err(scope, action, "command_failed",
-                     f"{action} {unit} failed (exit {ec})", err.strip()), 1
+                     f"{action} {unit} failed (exit {ec})", (err or "").strip()), 1
 
     return _ok(scope, action, {"unit": unit}), 0
 
@@ -316,33 +350,70 @@ def cmd_daemon_reload(args, scope):
         cmd.insert(idx, "--user")
 
     ec, out, err = _run(cmd)
-    if ec is None:
+    if ec == EXIT_TIMEOUT:
+        msg = (
+            f"daemon-reload timed out after 30s — usually means pkexec is waiting "
+            f"for a polkit auth agent that isn't running in this session. Install "
+            f"polkit-gnome and start it via Hyprland exec-once."
+        )
+        return _err(scope, "daemon-reload", "timeout", msg, (err or "").strip()), 124
+    if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, "daemon-reload", "binary_missing",
                      f"Binary not found: {cmd[0]}", err), 3
     if ec != 0:
         return _err(scope, "daemon-reload", "command_failed",
-                     f"daemon-reload failed (exit {ec})", err.strip()), 1
+                     f"daemon-reload failed (exit {ec})", (err or "").strip()), 1
 
     return _ok(scope, "daemon-reload", {}), 0
 
 
 def cmd_diagnose():
     import platform
+    pkexec_available = _bin_check(_pkexec())
+    polkit_agent_ok = _polkit_agent_running()
     data = {
         "pythonVersion": platform.python_version(),
         "helperVersion": __version__,
-        "systemctl": _bin_check(_ctl()),
-        "journalctl": _bin_check(_jctl()),
-        "pkexec": _bin_check(_pkexec()),
-        "scopeUser": True,
-        "scopeSystem": True,
-        "canElevate": _bin_check(_pkexec()),
+        "systemctl":     _bin_check(_ctl()),
+        "journalctl":    _bin_check(_jctl()),
+        "pkexec":        pkexec_available,
+        "polkitAgent":   polkit_agent_ok,
+        "scopeUser":     True,
+        "scopeSystem":   True,
+        # canElevate is True only when both pkexec AND a polkit agent are
+        # available. If pkexec exists but no agent is registered, canElevate
+        # stays False so the UI doesn't lie — mutations will hang otherwise.
+        "canElevate":    pkexec_available and polkit_agent_ok,
     }
     return _ok(None, "diagnose", data), 0
 
 
 def _bin_check(path):
     return shutil.which(path) is not None
+
+
+def _polkit_agent_running():
+    """True if any polkit authentication agent is registered in this user's session.
+
+    Polkit decides whether non-passwordless administrative actions succeed based
+    on whether an agent is reachable. pgrep on the user's session catches the
+    common agents shipped with Arch-based distros (polkit-gnome,
+    polkit-kde-agent, polkit-mate, lxpolkit, etc.) without requiring us to
+    introspect the session D-Bus from this helper process.
+    """
+    try:
+        uid = os.getuid()
+        # Match any "polkit" + "agent" — agent binaries all share that pair.
+        r = subprocess.run(
+            ["pgrep", "-u", str(uid), "-f", "polkit.*[Aa]uthentication.*[Aa]gent"],
+            capture_output=True, text=True, timeout=2
+        )
+        return r.returncode == 0 and r.stdout.strip() != ""
+    except Exception:
+        # If pgrep isn't available or anything else goes wrong, fall back to the
+        # historical behaviour (pkexec-on-PATH is sufficient) so we don't block
+        # users on systems where pgrep isn't installed.
+        return True
 
 
 # ── argument parsing ─────────────────────────────────────────────────────
