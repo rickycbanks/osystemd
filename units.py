@@ -393,27 +393,51 @@ def _bin_check(path):
 
 
 def _polkit_agent_running():
-    """True if any polkit authentication agent is registered in this user's session.
+    """True if any polkit authentication agent is reachable in this user's session.
 
-    Polkit decides whether non-passwordless administrative actions succeed based
-    on whether an agent is reachable. pgrep on the user's session catches the
-    common agents shipped with Arch-based distros (polkit-gnome,
-    polkit-kde-agent, polkit-mate, lxpolkit, etc.) without requiring us to
-    introspect the session D-Bus from this helper process.
+    We probe two paths:
+
+    1. Standalone agents (polkit-gnome, polkit-kde-agent, lxpolkit,
+       polkit-mate, etc.) via pgrep, matching processes named with
+       "polkit" + "authentication agent". These are common on
+       GNOME/KDE/MATE/LXQt sessions.
+
+    2. Quickshell-embedded agents like Omarchy's bundled polkit plugin
+       (registered via Quickshell.Services.Polkit). The agent runs
+       inside the `quickshell` process so pgrep does not see it; we
+       detect by checking whether the well-known plugin QML file is
+       on disk. This is heuristic but accurate for first-party Omarchy
+       installations.
     """
+    uid = os.getuid()
+
+    # 1. Standalone agent process check.
     try:
-        uid = os.getuid()
-        # Match any "polkit" + "agent" — agent binaries all share that pair.
         r = subprocess.run(
-            ["pgrep", "-u", str(uid), "-f", "polkit.*[Aa]uthentication.*[Aa]gent"],
+            ["pgrep", "-u", str(uid), "-f",
+             "polkit.*[Aa]uthentication.*[Aa]gent"],
             capture_output=True, text=True, timeout=2
         )
-        return r.returncode == 0 and r.stdout.strip() != ""
+        if r.returncode == 0 and r.stdout.strip():
+            return True
     except Exception:
-        # If pgrep isn't available or anything else goes wrong, fall back to the
-        # historical behaviour (pkexec-on-PATH is sufficient) so we don't block
-        # users on systems where pgrep isn't installed.
-        return True
+        # pgrep not available or failed; fall through.
+        pass
+
+    # 2. Quickshell-embedded agent check — look for the bundled plugin
+    #    QML at well-known first-party plugin paths. Omarchy's
+    #    omarchy.polkit lives at /usr/share/omarchy/shell/plugins/polkit/.
+    #    Keep this list small and explicit; do not scan broadly.
+    bundle_paths = [
+        "/usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml",
+        "/etc/quickshell/services/polkit/PolkitAgent.qml",
+        "/usr/share/quickshell/services/polkit/PolkitAgent.qml",
+    ]
+    for path in bundle_paths:
+        if os.path.isfile(path):
+            return True
+
+    return False
 
 
 # ── argument parsing ─────────────────────────────────────────────────────
