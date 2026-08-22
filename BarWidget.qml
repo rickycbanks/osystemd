@@ -1,75 +1,67 @@
 import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
 import Quickshell
 import qs.Commons
-import osystemd
+import qs.Ui
 import "Model.js" as Model
 
-/// Bar-widget entry point: compact indicator dot + optional failed count.
-Item {
+BarWidget {
     id: root
+    moduleName: "io.github.rickycbanks.osystemd"
+
+    // ── Service lookup (mirrors Sandman pattern) ──────────────────────
+    readonly property var service: bar && bar.shell
+        ? bar.shell.serviceFor("io.github.rickycbanks.osystemd") : null
+    readonly property bool hasService: service !== null
+    readonly property int failedCount: service ? service.failedCount : 0
+
     readonly property color _warnColor: "#e0a040"
     readonly property color _successColor: "#80c080"
-    implicitWidth: 24
-    implicitHeight: 24
 
-    // ── Dot indicator ──────────────────────────────────────────────────
-    Rectangle {
-        id: dot
-        anchors.centerIn: parent
-        width: 10
-        height: 10
-        radius: 5
-        color: {
-            var key = Model.indicatorColor(Service.failedCount, Service.lastError);
-            if (key === "error") return Color.urgent;
-            if (key === "warn") return _warnColor;
-            return _successColor;
+    // ── Panel open/close/toggle ───────────────────────────────────────
+    readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+
+    function open() { if (panelLoader.item) panelLoader.item.open() }
+    function close() { if (panelLoader.item) panelLoader.item.close() }
+    function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
+
+    // ── Inject properties into the loaded panel ───────────────────────
+    function injectPanel() {
+        if (!panelLoader.item) return
+        panelLoader.item.bar = root.bar
+        panelLoader.item.anchorItem = button
+        panelLoader.item.hostWidget = root
+        panelLoader.item.service = root.service
+    }
+
+    implicitWidth: button.implicitWidth
+    implicitHeight: button.implicitHeight
+
+    onBarChanged: injectPanel()
+    onServiceChanged: injectPanel()
+
+    // ── Panel loader ──────────────────────────────────────────────────
+    Loader {
+        id: panelLoader
+        active: true
+        source: Qt.resolvedUrl("./Panel.qml")
+        visible: false
+        onLoaded: {
+            root.injectPanel()
+            Qt.callLater(root.injectPanel)
         }
-
-        // Pulse animation on failure
-        SequentialAnimation {
-            loops: Service.failedCount > 0 ? Animation.Infinite : 0
-            running: loops > 0
-            NumberAnimation {
-                target: dot; property: "scale"
-                from: 1.0; to: 1.3; duration: 600
-                easing.type: Easing.InOutQuad
-            }
-            NumberAnimation {
-                target: dot; property: "scale"
-                from: 1.3; to: 1.0; duration: 600
-                easing.type: Easing.InOutQuad
-            }
-        }
     }
 
-    // ── Failed count badge (visible only when > 0) ────────────────────
-    Text {
-        id: countLabel
-        anchors.left: dot.right
-        anchors.leftMargin: 2
-        anchors.verticalCenter: dot.verticalCenter
-        visible: Service.failedCount > 0
-        text: String(Service.failedCount)
-        font.pixelSize: Style.font.bodySmall
-        font.bold: true
-        color: Color.urgent
-    }
-
-    // ── Tooltip on hover ───────────────────────────────────────────────
-    ToolTip {
-        id: tooltip
-        visible: hoverArea.containsMouse
-        text: Model.indicatorTooltip(Service.failedCount, Service.scope, Service.lastError)
-        delay: 400
-    }
-
-    MouseArea {
-        id: hoverArea
+    // ── Bar button ────────────────────────────────────────────────────
+    WidgetButton {
+        id: button
         anchors.fill: parent
-        hoverEnabled: true
-        onClicked: Service.openPanel(root)
+        bar: root.bar
+        text: "\u2699"
+        tooltipText: service
+            ? Model.indicatorTooltip(service.failedCount, service.scope, service.lastError)
+            : "osystemd"
+        onPressed: function(buttonCode) {
+            if (buttonCode === Qt.LeftButton) root.toggle()
+        }
     }
 }

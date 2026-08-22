@@ -1,4 +1,0 @@
-module osystemd
-singleton Service 1.0 Service.qml
-singleton Settings 1.0 Settings.qml
-Model.js 1.0 Model.js

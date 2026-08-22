@@ -3,17 +3,20 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-pragma Singleton
-
-Singleton {
+Item {
     id: root
+
+    // ── Property defaults (formerly in Settings.qml) ─────────────────
+    property string scope: "user"
+    property int refreshIntervalMs: 30000
+    property int journalLines: 100
+    property var typeFilter: ["service", "timer", "socket", "mount", "automount", "path", "swap", "target"]
+    property var stateFilter: ["active", "inactive", "failed"]
+    property var pinned: []
 
     // ── Model state ───────────────────────────────────────────────────
     property var units: []
-    property string scope: Settings.scope
     property string searchQuery: ""
-    property var typeFilter: Settings.typeFilter   // array of strings
-    property var stateFilter: Settings.stateFilter // array of strings
     property string selectedUnit: ""
     property var detail: ({})
     property int failedCount: 0
@@ -21,9 +24,19 @@ Singleton {
     property string lastError: ""
     property bool canElevate: false
     property var lastUpdated: null
-    property bool panelVisible: false
-    property var panelAnchor: null   // Item, the bar button that triggered the panel
     property string helperPath: ""
+
+    // ── Toggle a unit name in the pinned list ────────────────────────
+    function togglePin(unitName) {
+        var idx = root.pinned.indexOf(unitName);
+        var updated = root.pinned.slice();
+        if (idx >= 0) {
+            updated.splice(idx, 1);
+        } else {
+            updated.push(unitName);
+        }
+        root.pinned = updated;
+    }
 
     // ── Derived: filtered + sorted unit list ───────────────────────────
     property var filteredUnits: {
@@ -45,8 +58,8 @@ Singleton {
 
         // Pin pinned units to top, then alphabetical
         list.sort(function (a, b) {
-            var pa = Settings.pinned.indexOf(a.name) >= 0 ? -1 : 0;
-            var pb = Settings.pinned.indexOf(b.name) >= 0 ? -1 : 0;
+            var pa = pinned.indexOf(a.name) >= 0 ? -1 : 0;
+            var pb = pinned.indexOf(b.name) >= 0 ? -1 : 0;
             if (pa !== pb) return pa - pb;
             return a.name.localeCompare(b.name);
         });
@@ -62,20 +75,11 @@ Singleton {
         failedCount = count;
     }
 
-    // ── IPC: Panel visibility ──────────────────────────────────────────
-    function togglePanel(anchorItem) {
-        if (panelVisible) { panelVisible = false; }
-        else { openPanel(anchorItem); }
-    }
-    function openPanel(anchorItem)   { panelAnchor = anchorItem || null; panelVisible = true; }
-    function closePanel()  { panelAnchor = null; panelVisible = false; }
-
     // ── IPC: Refresh unit list ────────────────────────────────────────
     function refresh() {
         busy = true;
         lastError = "";
         var args = ["list", "--scope", scope];
-        // Pass type filter to systemctl for server-side filtering
         if (typeFilter.length > 0) {
             args.push("--types");
             args.push(typeFilter.join(","));
@@ -108,7 +112,7 @@ Singleton {
         var args = [tab, selectedUnit, "--scope", scope];
         if (tab === "journal") {
             args.push("--lines");
-            args.push(String(Settings.journalLines));
+            args.push(String(journalLines));
         }
         var procs = {
             "status": detailProc,
@@ -124,7 +128,6 @@ Singleton {
     // ── IPC: Scope toggle ──────────────────────────────────────────────
     function setScope(s) {
         scope = s;
-        Settings.scope = s;
         refresh();
     }
 
@@ -232,7 +235,6 @@ Singleton {
                 try {
                     var envelope = JSON.parse(mutateCollector.text);
                     if (envelope.ok) {
-                        // Re-fetch the list so the UI updates
                         root.refresh();
                     } else {
                         root.lastError = envelope.error ? envelope.error.message : "mutate failed";
@@ -244,27 +246,7 @@ Singleton {
         }
     }
 
-    // ── Polling timer ──────────────────────────────────────────────────
-    Timer {
-        id: pollTimer
-        interval: Settings.refreshIntervalMs
-        repeat: true
-        onTriggered: root.refresh()
-    }
-
-    // ── Bootstrap ──────────────────────────────────────────────────────
-    Component.onCompleted: {
-        helperPath = Qt.urlToLocalFile(Qt.resolvedUrl(Qt.url("./units.py")));
-
-        // Run diagnose once to populate canElevate
-        diagnoseProc.command = ["python3", helperPath, "diagnose"];
-        diagnoseProc.running = true;
-
-        // Start periodic refresh
-        pollTimer.start();
-        root.refresh();
-    }
-
+    // ── Process: diagnose ──────────────────────────────────────────────
     Process {
         id: diagnoseProc
         running: false
@@ -281,5 +263,44 @@ Singleton {
                 }
             }
         }
+    }
+
+    // ── Polling timer ──────────────────────────────────────────────────
+    Timer {
+        id: pollTimer
+        interval: refreshIntervalMs
+        repeat: true
+        onTriggered: root.refresh()
+    }
+
+    // ── Bootstrap ──────────────────────────────────────────────────────
+    Component.onCompleted: {
+        var url = String(Qt.resolvedUrl("./units.py"))
+        helperPath = decodeURIComponent(url.indexOf("file://") === 0 ? url.substring(7) : url)
+
+        // Run diagnose once to populate canElevate
+        diagnoseProc.command = ["python3", helperPath, "diagnose"];
+        diagnoseProc.running = true;
+
+        // Start periodic refresh
+        pollTimer.start();
+        root.refresh();
+    }
+
+    // ── IPC ────────────────────────────────────────────────────────────
+    IpcHandler {
+        target: "io.github.rickycbanks.osystemd"
+
+        function status(): string {
+            return JSON.stringify({
+                failedCount: root.failedCount,
+                scope: root.scope,
+                lastError: root.lastError,
+                busy: root.busy,
+                canElevate: root.canElevate
+            })
+        }
+
+        function refresh(): void { root.refresh() }
     }
 }
