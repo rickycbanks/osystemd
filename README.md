@@ -1,4 +1,4 @@
-# osystemd
+# oSystemd
 
 **Manage systemd units from the Omarchy bar.**
 
@@ -25,6 +25,12 @@ omarchy plugin add https://github.com/rickycbanks/osystemd.git
 ```
 
 Then restart `omarchy-shell` (or wait for the shell to auto-detect the new plugin).
+
+### Remove
+
+```bash
+omarchy-plugin-remove io.github.rickycbanks.osystemd
+```
 
 ## Polkit Setup
 
@@ -54,34 +60,10 @@ Settings are stored as JSON at:
 
 ## Screenshots
 
-> _Screenshots coming soon._
+[<img alt="Cups.Service" src="assets/quickview.png" />]
 
-## Troubleshooting
+[<img alt="alt text" src="assets/actions.png" />]
 
-### `python3: not found`
-Ensure Python 3 is installed and on your `$PATH`. The plugin uses `python3` to
-run the `units.py` helper.
-
-### `pkexec` fails / no password prompt
-- Verify `pkexec` is installed: `which pkexec`
-- Ensure your user is in a group that polkit allows (usually `sudo` or `wheel`).
-- Check polkit logs: `journalctl -u polkit.service`
-
-### Journal access denied
-Add your user to the `systemd-journal` group:
-```bash
-sudo usermod -aG systemd-journal $USER
-```
-Then log out and back in.
-
-### Units missing
-- Check that the scope matches what `systemctl list-units` shows.
-- Ensure you're looking at the right type filter (some units are timers, not services).
-
-### Panel doesn't appear
-- Check `omarchy-shell` logs for QML errors.
-- Verify the plugin directory is in the correct location for your shell profile.
-- Ensure `units.py` is executable: `chmod +x units.py`.
 
 ## Credits
 
