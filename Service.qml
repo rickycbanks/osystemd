@@ -101,7 +101,7 @@ Item {
     // ── IPC: Select a unit and load its status ─────────────────────────
     function selectUnit(name) {
         selectedUnit = name;
-        detail = {};
+        detail = {};          // clear previous unit's detail (incl. journal/files)
         loadDetailTab("status");
     }
 
@@ -123,6 +123,7 @@ Item {
             "journal": journalProc
         };
         var proc = procs[tab] || detailProc;
+        detailProc.pendingTab = tab;  // track which subcommand is in flight
         proc.command = ["python3", helperPath].concat(args);
         proc.running = true;
     }
@@ -184,6 +185,7 @@ Item {
     Process {
         id: detailProc
         running: false
+        property string pendingTab: ""
         stdout: StdioCollector {
             id: detailCollector
             onStreamFinished: {
@@ -191,7 +193,19 @@ Item {
                 try {
                     var envelope = JSON.parse(detailCollector.text);
                     if (envelope.ok) {
-                        root.detail = envelope.data || {};
+                        var d = envelope.data || {};
+                        // Merge rather than replace so the Actions tab still
+                        // sees ActiveState (from a prior `status` call) after
+                        // the user visits Unit File (`cat`) — and vice versa.
+                        var merged = Object.assign({}, root.detail, d);
+                        // A `cat` response carries `files`/`raw`; a `status`
+                        // response carries scalar fields. Don't let stale
+                        // `files` from a previous unit leak across selections.
+                        if (detailProc.pendingTab === "status" || detailProc.pendingTab === "show") {
+                            delete merged.files;
+                            delete merged.raw;
+                        }
+                        root.detail = merged;
                     } else {
                         root.lastError = envelope.error ? envelope.error.message : "detail failed";
                     }

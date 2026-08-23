@@ -70,6 +70,17 @@ Panel {
     function togglePin(name) { if (service) service.togglePin(name) }
     function scopeLabel(s) { return Model.scopeLabel(s) }
 
+    // Map panel tab index → helper subcommand and switch to it, fetching
+    // the data for that tab if a unit is selected. Without this, clicking
+    // "Unit File" or "Journal" switched the view but never issued the
+    // `cat` / `journal` command — so the tab looked "disabled".
+    function _selectTab(index) {
+        content.currentTab = index;
+        if (root.panelSelectedUnit === "") return;
+        var sub = ["status", "status", "cat", "journal"][index];
+        if (sub) root.loadDetailTab(sub);
+    }
+
     function switchPanel(direction) {
         if (root.bar && typeof root.bar.switchPanelFrom === "function")
             return root.bar.switchPanelFrom(root.barIdentity, direction)
@@ -475,7 +486,7 @@ Panel {
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
-                                                onClicked: content.currentTab = index
+                                                onClicked: root._selectTab(index)
                                             }
                                         }
                                     }
