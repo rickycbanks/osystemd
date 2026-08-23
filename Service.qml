@@ -16,6 +16,7 @@ Item {
 
     // ── Model state ───────────────────────────────────────────────────
     property var units: []
+    property var unloadedUnits: []
     property string searchQuery: ""
     property string selectedUnit: ""
     property var detail: ({})
@@ -67,6 +68,7 @@ Item {
     }
 
     // ── Update failed count when units change ──────────────────────────
+    // Note: unloaded units don't have a runtime state and are not counted here.
     onUnitsChanged: {
         var count = 0;
         for (var i = 0; i < units.length; i++) {
@@ -166,6 +168,7 @@ Item {
                     var envelope = JSON.parse(listCollector.text);
                     if (envelope.ok) {
                         root.units = envelope.data.units || [];
+                        root.unloadedUnits = envelope.data.unloaded || [];
                         root.lastUpdated = new Date();
                     } else {
                         root.lastError = envelope.error ? envelope.error.message : "list failed";

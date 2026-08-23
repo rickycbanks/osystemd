@@ -113,3 +113,35 @@ function stateBadge(active, sub) {
     if (s === "dead") return "DEAD";
     return a.substring(0, 4).toUpperCase();
 }
+
+// ── File-state → color key ────────────────────────────────────────────
+function fileStateColorKey(fileState) {
+    if (!fileState) return "neutral";
+    var s = fileState.toLowerCase();
+    if (s === "enabled")   return "success";
+    if (s === "masked")    return "error";
+    if (s === "static")    return "warn";
+    if (s === "generated") return "warn";
+    if (s === "disabled")  return "neutral";
+    if (s === "transient") return "warn";
+    if (s === "bad")       return "error";
+    if (s === "indirect")  return "neutral";
+    if (s === "alias")     return "neutral";
+    return "neutral";
+}
+
+// ── File-state → short badge label ────────────────────────────────────
+function fileStateBadge(fileState) {
+    if (!fileState) return "\u2014";
+    var s = fileState.toLowerCase();
+    if (s === "enabled")   return "ENBL";
+    if (s === "disabled")  return "DSBL";
+    if (s === "static")    return "STAT";
+    if (s === "masked")    return "MASK";
+    if (s === "generated") return "GEN";
+    if (s === "transient") return "TRNS";
+    if (s === "bad")       return "BAD";
+    if (s === "indirect")  return "IND";
+    if (s === "alias")     return "ALIAS";
+    return fileState.substring(0, 4).toUpperCase();
+}
