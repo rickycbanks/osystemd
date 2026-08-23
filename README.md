@@ -11,6 +11,7 @@ files and journals — all from a compact bar widget and a rich panel UI.
 - **Type & State Filters** — Chip-based toggles for service, timer, socket, mount, and more; filter by active/inactive/failed state.
 - **Status Inspection** — Key fields at a glance: PID, load state, fragment path, activation timestamp.
 - **Mutations** — Start, stop, restart, enable, disable, mask, unmask with confirmation-aware UI.
+- **Unloaded Units Section** — View unit files installed on disk but not currently loaded by systemd (e.g., D-Bus-activated services like `fprintd`). Start, enable, disable, or mask them from the same panel.
 - **Unit File Viewer** — Monospace rendering of unit file contents via `systemctl cat`.
 - **Journal Peek** — Tail recent journal lines for any unit without leaving the panel.
 - **Scope Toggle** — Switch between user and system scope instantly; system mutations use polkit elevation.

@@ -105,6 +105,42 @@ def _run_checked(cmd, scope, action):
     return out, 0
 
 
+def _parse_unit_files_output(text, type_filter, state_filter):
+    """Parse raw ``systemctl list-unit-files`` output into a list of dicts.
+
+    Each dict has ``name``, ``type``, ``fileState``, ``preset``.
+    ``type_filter`` and ``state_filter`` are comma-separated strings (or "").
+    """
+    tf = set(type_filter.split(",")) if type_filter else set()
+    sf = set(state_filter.split(",")) if state_filter else set()
+    results = []
+    for line in text.splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        name = parts[0]
+        if name == "UNIT":
+            continue  # header line
+        file_state = parts[1]
+        preset = parts[2]
+        dot = name.rfind(".")
+        utype = name[dot + 1:] if dot >= 0 else ""
+        if tf and utype not in tf:
+            continue
+        if sf and file_state not in sf:
+            continue
+        results.append({
+            "name": name,
+            "type": utype,
+            "fileState": file_state,
+            "preset": preset,
+        })
+    return results
+
+
 def _needs_pkexec(scope, action):
     return scope == "system" and action in MUTATION_ACTIONS
 
@@ -191,7 +227,71 @@ def cmd_list(args, scope):
             "description": desc,
         })
 
-    return _ok(scope, "list", {"units": units}), 0
+    # ── Unloaded units (from list-unit-files) ──────────────────────────
+    unloaded = []
+    try:
+        uf_cmd = [_ctl(), "list-unit-files", "--no-legend", "--plain"]
+        if scope == "user":
+            uf_cmd.append("--user")
+        if type_filter:
+            uf_cmd.append(f"--type={type_filter}")
+        if state_filter:
+            uf_cmd.append(f"--state={state_filter}")
+        uf_ec, uf_out, uf_err = _run(uf_cmd)
+        if uf_ec == 0 and uf_out:
+            all_files = _parse_unit_files_output(uf_out, type_filter, "")
+            loaded_names = {u["name"] for u in units}
+            unloaded = [f for f in all_files if f["name"] not in loaded_names]
+    except Exception:
+        # list-unit-files failure should not break the main list
+        pass
+
+    return _ok(scope, "list", {"units": units, "unloaded": unloaded}), 0
+
+
+def cmd_list_unit_files(args, scope):
+    """``list-unit-files --scope SYSTEM [--types …] [--states …]``."""
+    type_filter = ""
+    state_filter = ""
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--types" and i + 1 < len(args):
+            type_filter = args[i + 1]
+            i += 2
+        elif args[i] == "--states" and i + 1 < len(args):
+            state_filter = args[i + 1]
+            i += 2
+        elif args[i].startswith("--types="):
+            type_filter = args[i].split("=", 1)[1]
+            i += 1
+        elif args[i].startswith("--states="):
+            state_filter = args[i].split("=", 1)[1]
+            i += 1
+        else:
+            i += 1
+
+    cmd = [_ctl(), "list-unit-files", "--no-legend", "--plain"]
+    if scope == "user":
+        cmd.append("--user")
+    if type_filter:
+        cmd.append(f"--type={type_filter}")
+    if state_filter:
+        cmd.append(f"--state={state_filter}")
+
+    ec, out, err = _run(cmd)
+    if ec == EXIT_NOT_FOUND or ec is None:
+        return _err(scope, "list-unit-files", "binary_missing",
+                     f"Binary not found: {_ctl()}", err), 3
+    if ec == EXIT_TIMEOUT:
+        return _err(scope, "list-unit-files", "timeout",
+                     f"list-unit-files timed out after 30s", (err or "").strip()), 124
+    if ec != 0:
+        return _err(scope, "list-unit-files", "command_failed",
+                     f"list-unit-files failed (exit {ec})", err.strip()), 1
+
+    units = _parse_unit_files_output(out, type_filter, state_filter)
+    return _ok(scope, "list-unit-files", {"units": units}), 0
 
 
 def cmd_status(args, scope):
@@ -476,6 +576,8 @@ def main():
 
     if cmd == "list":
         out, ec = cmd_list(remaining, scope)
+    elif cmd == "list-unit-files":
+        out, ec = cmd_list_unit_files(remaining, scope)
     elif cmd == "status":
         out, ec = cmd_status(remaining, scope)
     elif cmd == "show":

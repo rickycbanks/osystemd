@@ -32,6 +32,12 @@ def pick_canned():
             return os.path.join(CANNED_DIR, "list_user.txt")
         return os.path.join(CANNED_DIR, "list_system.txt")
 
+    # list-unit-files command
+    if remaining and remaining[0] == "list-unit-files":
+        if is_user:
+            return os.path.join(CANNED_DIR, "list_unit_files_user.txt")
+        return os.path.join(CANNED_DIR, "list_unit_files_system.txt")
+
     # show command
     if remaining and remaining[0] == "show":
         return os.path.join(CANNED_DIR, "show_sshd.txt")
@@ -50,21 +56,39 @@ if canned and os.path.exists(canned):
         lines = f.readlines()
     # Apply --type and --state filters (skip header line)
     if type_filter or state_filter:
+        is_unit_files = (remaining and remaining[0] == "list-unit-files")
         filtered = []
         for line in lines:
-            parts = line.split(None, 4)
-            if len(parts) < 4:
-                continue  # skip header / empty lines
-            name = parts[0]
-            if name == "UNIT":
-                continue  # skip header
-            active = parts[2]
-            dot = name.rfind(".")
-            utype = name[dot + 1:] if dot >= 0 else ""
-            if type_filter and utype not in type_filter:
-                continue
-            if state_filter and active not in state_filter:
-                continue
+            if is_unit_files:
+                # list-unit-files format: UNIT STATE PRESET (3 fields)
+                parts = line.split(None, 2)
+                if len(parts) < 3:
+                    continue
+                name = parts[0]
+                if name == "UNIT":
+                    continue
+                file_state = parts[1]
+                dot = name.rfind(".")
+                utype = name[dot + 1:] if dot >= 0 else ""
+                if type_filter and utype not in type_filter:
+                    continue
+                if state_filter and file_state not in state_filter:
+                    continue
+            else:
+                # list-units format: UNIT LOAD ACTIVE SUB DESCRIPTION (5 fields)
+                parts = line.split(None, 4)
+                if len(parts) < 4:
+                    continue
+                name = parts[0]
+                if name == "UNIT":
+                    continue
+                active = parts[2]
+                dot = name.rfind(".")
+                utype = name[dot + 1:] if dot >= 0 else ""
+                if type_filter and utype not in type_filter:
+                    continue
+                if state_filter and active not in state_filter:
+                    continue
             filtered.append(line)
         print("".join(filtered), end="")
     else:

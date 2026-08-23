@@ -126,6 +126,74 @@ class TestList(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["scope"], "system")
 
+    def test_list_includes_unloaded_field(self):
+        data, ec = _run_units("list", "--scope", "system")
+        self.assertEqual(ec, 0)
+        self.assertIn("unloaded", data["data"])
+        self.assertIsInstance(data["data"]["unloaded"], list)
+        self.assertGreater(len(data["data"]["unloaded"]), 0)
+
+    def test_list_unloaded_excludes_loaded_units(self):
+        data, ec = _run_units("list", "--scope", "system")
+        self.assertEqual(ec, 0)
+        loaded_names = {u["name"] for u in data["data"]["units"]}
+        unloaded_names = {u["name"] for u in data["data"]["unloaded"]}
+        # No overlap
+        self.assertEqual(loaded_names & unloaded_names, set())
+        # alsa-restore.service is in loaded, must NOT be in unloaded
+        self.assertIn("alsa-restore.service", loaded_names)
+        self.assertNotIn("alsa-restore.service", unloaded_names)
+
+    def test_list_unloaded_fprintd_present(self):
+        data, ec = _run_units("list", "--scope", "system")
+        self.assertEqual(ec, 0)
+        unloaded_names = [u["name"] for u in data["data"]["unloaded"]]
+        self.assertIn("fprintd.service", unloaded_names)
+
+    def test_list_unloaded_uses_correct_shape(self):
+        data, ec = _run_units("list", "--scope", "system")
+        self.assertEqual(ec, 0)
+        for item in data["data"]["unloaded"]:
+            self.assertIn("name", item)
+            self.assertIn("type", item)
+            self.assertIn("fileState", item)
+            self.assertIn("preset", item)
+
+    def test_list_unloaded_type_filter(self):
+        data, ec = _run_units("list", "--scope", "system", "--types", "service")
+        self.assertEqual(ec, 0)
+        # fprintd is a service, should still be in unloaded
+        unloaded_names = [u["name"] for u in data["data"]["unloaded"]]
+        self.assertIn("fprintd.service", unloaded_names)
+
+    def test_list_unloaded_state_filter(self):
+        data, ec = _run_units("list", "--scope", "system", "--states", "static")
+        self.assertEqual(ec, 0)
+        # Only static units should appear in unloaded
+        for item in data["data"]["unloaded"]:
+            self.assertEqual(item["fileState"], "static")
+        unloaded_names = [u["name"] for u in data["data"]["unloaded"]]
+        self.assertIn("fprintd.service", unloaded_names)
+        self.assertIn("cron.service", unloaded_names)
+
+    def test_list_unloaded_does_not_fail_when_list_unit_files_missing(self):
+        """list --scope user still returns ok with unloaded=[] if list-unit-files fails."""
+        old = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        # Use a custom stub that succeeds on list-units but fails on list-unit-files
+        stub_path = os.path.join(STUBS_DIR, "systemctl_partial_fail.py")
+        try:
+            os.environ["OSYSTEMD_SYSTEMCTL"] = stub_path
+            data, ec = _run_units("list", "--scope", "user")
+            self.assertEqual(ec, 0)
+            self.assertTrue(data["ok"])
+            self.assertIn("unloaded", data["data"])
+            self.assertEqual(data["data"]["unloaded"], [])
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_SYSTEMCTL"] = old
+            else:
+                del os.environ["OSYSTEMD_SYSTEMCTL"]
+
 
 class TestStatus(unittest.TestCase):
     def setUp(self):
@@ -396,6 +464,62 @@ class TestTimeoutHandling(unittest.TestCase):
             self.assertEqual(ec, 124)
             self.assertFalse(data["ok"])
             self.assertEqual(data["error"]["code"], "timeout")
+
+
+class TestListUnitFiles(unittest.TestCase):
+    def setUp(self):
+        _clean_pkexec_record()
+
+    def test_list_unit_files_system(self):
+        data, ec = _run_units("list-unit-files", "--scope", "system")
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["scope"], "system")
+        units_list = data["data"]["units"]
+        self.assertGreater(len(units_list), 0)
+
+    def test_list_unit_files_user(self):
+        data, ec = _run_units("list-unit-files", "--scope", "user")
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["scope"], "user")
+        units_list = data["data"]["units"]
+        self.assertGreater(len(units_list), 0)
+
+    def test_list_unit_files_parses_file_state_and_preset(self):
+        data, ec = _run_units("list-unit-files", "--scope", "system")
+        self.assertEqual(ec, 0)
+        for item in data["data"]["units"]:
+            self.assertIn("fileState", item)
+            self.assertIn("preset", item)
+            self.assertNotEqual(item["fileState"], "")
+            self.assertNotEqual(item["preset"], "")
+
+    def test_list_unit_files_type_filter(self):
+        data, ec = _run_units("list-unit-files", "--scope", "system", "--types", "service")
+        self.assertEqual(ec, 0)
+        units_list = data["data"]["units"]
+        for u in units_list:
+            self.assertEqual(u["type"], "service")
+        # fprintd is a service, should be present
+        names = [u["name"] for u in units_list]
+        self.assertIn("fprintd.service", names)
+        # pipewire-pulse.socket should NOT be present (it's a socket)
+        self.assertNotIn("pipewire-pulse.socket", names)
+
+    def test_list_unit_files_state_filter(self):
+        data, ec = _run_units("list-unit-files", "--scope", "system", "--states", "masked")
+        self.assertEqual(ec, 0)
+        units_list = data["data"]["units"]
+        self.assertEqual(len(units_list), 1)
+        self.assertEqual(units_list[0]["name"], "test-masked.service")
+        self.assertEqual(units_list[0]["fileState"], "masked")
+
+    def test_list_unit_files_missing_scope_returns_usage(self):
+        data, ec = _run_units("list-unit-files")
+        self.assertEqual(ec, 2)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"]["code"], "usage")
 
 
 if __name__ == "__main__":

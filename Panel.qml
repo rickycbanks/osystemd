@@ -33,7 +33,19 @@ Panel {
     readonly property string panelLastError: service ? service.lastError : ""
     readonly property bool panelCanElevate: service ? service.canElevate : false
     readonly property var panelUnits: service ? service.units : []
+    readonly property var panelUnloadedUnits: service ? service.unloadedUnits : []
     readonly property var panelFilteredUnits: service ? service.filteredUnits : []
+    readonly property var panelFilteredUnloaded: {
+        var list = [];
+        for (var i = 0; i < panelUnloadedUnits.length; i++) {
+            var u = panelUnloadedUnits[i];
+            if (panelTypeFilter.indexOf(u.type) < 0) continue;
+            if (panelSearch !== "" && Model.searchScore(panelSearch, u) === 0) continue;
+            list.push(u);
+        }
+        list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        return list;
+    }
 
     // All available filter options for chip repeaters
     readonly property var _allTypeFilters: ["service","timer","socket","mount","automount","path","swap","target"]
@@ -44,6 +56,7 @@ Panel {
 
     // ── Panel-local state ─────────────────────────────────────────────
     property int currentTab: 0  // 0=Status, 1=Actions, 2=UnitFile, 3=Journal
+    property bool showUnloaded: true
 
     // ── Functions to invoke Service from the UI ──────────────────────
     function setScope(s) { if (service) service.setScope(s) }
@@ -56,6 +69,17 @@ Panel {
     function loadDetailTab(tab) { if (service) service.loadDetailTab(tab) }
     function togglePin(name) { if (service) service.togglePin(name) }
     function scopeLabel(s) { return Model.scopeLabel(s) }
+
+    // Map panel tab index → helper subcommand and switch to it, fetching
+    // the data for that tab if a unit is selected. Without this, clicking
+    // "Unit File" or "Journal" switched the view but never issued the
+    // `cat` / `journal` command — so the tab looked "disabled".
+    function _selectTab(index) {
+        content.currentTab = index;
+        if (root.panelSelectedUnit === "") return;
+        var sub = ["status", "status", "cat", "journal"][index];
+        if (sub) root.loadDetailTab(sub);
+    }
 
     function switchPanel(direction) {
         if (root.bar && typeof root.bar.switchPanelFrom === "function")
@@ -462,7 +486,7 @@ Panel {
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
-                                                onClicked: content.currentTab = index
+                                                onClicked: root._selectTab(index)
                                             }
                                         }
                                     }
@@ -578,14 +602,14 @@ Panel {
                                                     property bool btnEnabled: _actionEnabled(
                                                         model.action, model.needsActive)
                                                     color: {
-                                                        if (!btnEnabled) return Qt.rgba(1, 1, 1, 0.05);
+                                                        if (!btnEnabled) return Qt.rgba(0.4, 0.4, 0.4, 0.18);
                                                         return btnMouseArea.containsMouse ? Color.accent : Color.popups.background;
                                                     }
-                                                    border.color: Color.muted
+                                                    border.color: btnEnabled ? Color.muted : Qt.rgba(0.5, 0.5, 0.5, 0.4)
                                                     border.width: 1
                                                     Text {
                                                         anchors.centerIn: parent
-                                                        text: model.label
+                                                        text: btnEnabled ? model.label : "\uD83D\uDD12 " + model.label
                                                         font.pixelSize: Style.font.body
                                                         color: btnEnabled ? Color.foreground : Color.muted
                                                     }
@@ -595,6 +619,17 @@ Panel {
                                                         hoverEnabled: true
                                                         enabled: btnEnabled
                                                         onClicked: root.mutate(model.action, root.panelSelectedUnit)
+                                                        ToolTip.visible: hovered
+                                                        ToolTip.delay: 400
+                                                        ToolTip.text: {
+                                                            if (!btnEnabled) {
+                                                                if (model.action === "stop") return "Unit is not active \u2014 nothing to stop";
+                                                                if (root.panelScope === "system" && !root.panelCanElevate)
+                                                                    return "Requires polkit authentication \u2014 install polkit-gnome and start it via Hyprland exec-once";
+                                                                return "Not available";
+                                                            }
+                                                            return model.label + " \u2014 " + (model.action === "daemon-reload" ? "reload systemd manager configuration" : model.action + " this unit");
+                                                        }
                                                     }
                                                 }
                                             }
@@ -721,6 +756,170 @@ Panel {
                         }
                     }
 
+                    // ── UNLOADED UNITS SECTION ────────────────────────
+                    Column {
+                        width: parent.width
+                        visible: root.panelFilteredUnloaded.length > 0
+
+                        // Header bar
+                        Rectangle {
+                            width: parent.width
+                            height: 32
+                            radius: 4
+                            color: Color.popups.background
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                spacing: 6
+
+                                Text {
+                                    text: "Unloaded units"
+                                    font.pixelSize: Style.font.bodySmall
+                                    font.bold: true
+                                    color: Color.foreground
+                                }
+                                Text {
+                                    text: "(" + root.panelFilteredUnloaded.length + ")"
+                                    font.pixelSize: Style.font.bodySmall
+                                    color: Color.muted
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Text {
+                                    text: root.showUnloaded ? "\u25BE" : "\u25B8"
+                                    font.pixelSize: Style.font.body
+                                    color: Color.foreground
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: root.showUnloaded = !root.showUnloaded
+                            }
+                        }
+
+                        // Unloaded unit list
+                        Rectangle {
+                            width: parent.width
+                            height: root.showUnloaded ? 180 : 0
+                            color: Color.background
+                            radius: Style.cornerRadius
+                            clip: true
+                            visible: root.showUnloaded
+
+                            ListView {
+                                id: unloadedList
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                clip: true
+                                model: root.panelFilteredUnloaded
+
+                                delegate: Rectangle {
+                                    id: unloadedDelegate
+                                    required property var model
+                                    required property int index
+                                    width: unloadedList.width
+                                    height: 40
+                                    radius: 4
+                                    color: unloadedDelegateArea.containsMouse
+                                           ? Qt.rgba(1, 1, 1, 0.05)
+                                           : "transparent"
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 4
+                                        spacing: 6
+
+                                        // Type icon
+                                        Text {
+                                            text: _typeIcon(unloadedDelegate.model.type)
+                                            font.pixelSize: Style.font.bodySmall
+                                            color: Color.muted
+                                            Layout.preferredWidth: 18
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+
+                                        // Name
+                                        Text {
+                                            text: unloadedDelegate.model.name
+                                            font.pixelSize: Style.font.bodySmall
+                                            color: Color.foreground
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+
+                                        // File-state badge
+                                        Rectangle {
+                                            width: fsBadge.implicitWidth + 8
+                                            height: 16
+                                            radius: 3
+                                            color: {
+                                                var key = Model.fileStateColorKey(unloadedDelegate.model.fileState);
+                                                if (key === "success") return _successColor;
+                                                if (key === "error") return Color.urgent;
+                                                if (key === "warn") return _warnColor;
+                                                return Color.muted;
+                                            }
+                                            Text {
+                                                id: fsBadge
+                                                anchors.centerIn: parent
+                                                text: Model.fileStateBadge(unloadedDelegate.model.fileState)
+                                                font.pixelSize: 8
+                                                font.bold: true
+                                                color: "#ffffff"
+                                            }
+                                        }
+
+                                        // Inline action buttons
+                                        Row {
+                                            spacing: 2
+                                            visible: unloadedDelegateArea.containsMouse
+
+                                            Repeater {
+                                                model: _unloadedActions(unloadedDelegate.model.fileState)
+                                                Rectangle {
+                                                    width: actionText.implicitWidth + 8
+                                                    height: 20
+                                                    radius: 3
+                                                    color: actionArea.containsMouse ? Color.accent : Color.popups.background
+                                                    border.color: Color.muted
+                                                    border.width: 1
+                                                    Text {
+                                                        id: actionText
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        font.pixelSize: 8
+                                                        color: Color.foreground
+                                                    }
+                                                    MouseArea {
+                                                        id: actionArea
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        onClicked: root.mutate(modelData.action, unloadedDelegate.model.name)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: unloadedDelegateArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: root.selectUnit(unloadedDelegate.model.name)
+                                    }
+                                }
+
+                                ScrollBar.vertical: ScrollBar {
+                                    policy: ScrollBar.AsNeeded
+                                }
+                            }
+                        }
+                    }
+
                     // ── Error banner ─────────────────────────────────
                     Text {
                         visible: root.panelLastError !== ""
@@ -801,5 +1000,29 @@ Panel {
             return false;
         }
         return true;
+    }
+
+    function _unloadedActions(fileState) {
+        var s = (fileState || "").toLowerCase();
+        if (s === "static" || s === "disabled" || s === "generated" || s === "indirect") {
+            return [
+                { label: "Start",  action: "start" },
+                { label: "Enable", action: "enable" },
+                { label: "Mask",   action: "mask" }
+            ];
+        }
+        if (s === "enabled") {
+            return [
+                { label: "Start",   action: "start" },
+                { label: "Disable", action: "disable" },
+                { label: "Mask",    action: "mask" }
+            ];
+        }
+        if (s === "masked") {
+            return [
+                { label: "Unmask", action: "unmask" }
+            ];
+        }
+        return [];
     }
 }
