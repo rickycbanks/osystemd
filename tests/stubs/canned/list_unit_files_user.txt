@@ -1,0 +1,3 @@
+UNIT                          STATE    PRESET
+pipewire-pulse.socket         static   enabled
+user-example.service          disabled disabled

@@ -7,4 +7,6 @@ udisks2.service               loaded active running Disk Manager
 ModemManager.service          loaded active running Modem Manager
 bluetooth.service             loaded active running Bluetooth service
 fwupd.service                 loaded active running Firmware update daemon
+alsa-restore.service          loaded active running ALSA Restore
+avahi-daemon.service          loaded active running Avahi mDNS/DNS-SD Stack
 myservice.service             loaded failed failed  My test system service

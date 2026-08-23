@@ -1,0 +1,8 @@
+UNIT                          STATE    PRESET
+alsa-restore.service          enabled  enabled
+fprintd.service               static   disabled
+avahi-daemon.service          enabled  enabled
+nginx.service                 disabled disabled
+docker.service                disabled disabled
+test-masked.service           masked   disabled
+cron.service                  static   enabled
