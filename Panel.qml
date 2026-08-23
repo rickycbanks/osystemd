@@ -75,7 +75,7 @@ Panel {
     // "Unit File" or "Journal" switched the view but never issued the
     // `cat` / `journal` command — so the tab looked "disabled".
     function _selectTab(index) {
-        content.currentTab = index;
+        root.currentTab = index;
         if (root.panelSelectedUnit === "") return;
         var sub = ["status", "status", "cat", "journal"][index];
         if (sub) root.loadDetailTab(sub);
@@ -475,14 +475,14 @@ Panel {
                                             width: tabLabel.implicitWidth + 20
                                             height: 32
                                             radius: 4
-                                            color: content.currentTab === index ? Color.popups.background : "transparent"
+                                            color: root.currentTab === index ? Color.popups.background : "transparent"
                                             Text {
                                                 id: tabLabel
                                                 anchors.centerIn: parent
                                                 text: modelData
                                                 font.pixelSize: Style.font.body
-                                                font.bold: content.currentTab === index
-                                                color: content.currentTab === index ? Color.accent : Color.muted
+                                                font.bold: root.currentTab === index
+                                                color: root.currentTab === index ? Color.accent : Color.muted
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -504,7 +504,7 @@ Panel {
                                 StackLayout {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    currentIndex: content.currentTab
+                                    currentIndex: root.currentTab
 
                                     // 0: Status tab
                                     ScrollView {
@@ -619,7 +619,7 @@ Panel {
                                                         hoverEnabled: true
                                                         enabled: btnEnabled
                                                         onClicked: root.mutate(model.action, root.panelSelectedUnit)
-                                                        ToolTip.visible: hovered
+                                                        ToolTip.visible: btnMouseArea.containsMouse
                                                         ToolTip.delay: 400
                                                         ToolTip.text: {
                                                             if (!btnEnabled) {
