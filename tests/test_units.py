@@ -37,27 +37,12 @@ def _run_units(*cli_args):
     return json.loads(out), exit_code
 
 
-def _clean_pkexec_record():
-    path = os.path.join(CANNED_DIR, ".pkexec_invocation.txt")
-    if os.path.exists(path):
-        os.unlink(path)
-
-
-def _pkexec_invoked():
-    path = os.path.join(CANNED_DIR, ".pkexec_invocation.txt")
-    return os.path.exists(path)
-
-
 def setUpModule():
     os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "systemctl.py")
     os.environ["OSYSTEMD_JOURNALCTL"] = os.path.join(STUBS_DIR, "journalctl.py")
-    os.environ["OSYSTEMD_PKEXEC"] = os.path.join(STUBS_DIR, "pkexec.py")
 
 
 class TestList(unittest.TestCase):
-    def setUp(self):
-        _clean_pkexec_record()
-
     def test_list_user_parses_units(self):
         data, ec = _run_units("list", "--scope", "user")
         self.assertEqual(ec, 0)
@@ -196,9 +181,6 @@ class TestList(unittest.TestCase):
 
 
 class TestStatus(unittest.TestCase):
-    def setUp(self):
-        _clean_pkexec_record()
-
     def test_status_returns_curated_fields(self):
         data, ec = _run_units("status", "ssh.service", "--scope", "user")
         self.assertEqual(ec, 0)
@@ -258,96 +240,102 @@ class TestJournal(unittest.TestCase):
 
 
 class TestMutations(unittest.TestCase):
-    def setUp(self):
-        _clean_pkexec_record()
-
-    def test_user_start_no_pkexec(self):
-        _clean_pkexec_record()
+    def test_user_start_succeeds(self):
         data, ec = _run_units("start", "nginx.service", "--scope", "user")
         self.assertEqual(ec, 0)
         self.assertTrue(data["ok"])
-        self.assertFalse(_pkexec_invoked())
 
-    def test_system_start_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("start", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(data["ok"])
-        self.assertTrue(_pkexec_invoked())
+    def _assert_invokes_systemctl_not_pkexec(self, mock_run, scope):
+        """Assert the first command element is the systemctl stub, not pkexec."""
+        called_cmd = mock_run.call_args[0][0]
+        # The first element must be the systemctl binary (stub path in tests),
+        # not a pkexec wrapper.
+        self.assertNotEqual(called_cmd[0], "pkexec")
+        self.assertNotIn("pkexec", called_cmd)
+        # It must be the systemctl stub
+        self.assertIn("systemctl", called_cmd[0])
 
-    def test_system_stop_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("stop", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(_pkexec_invoked())
+    def test_system_start_invokes_systemctl_directly(self):
+        """System-scope mutations must invoke systemctl directly, not pkexec."""
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("start", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self.assertTrue(data["ok"])
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
-    def test_system_restart_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("restart", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(_pkexec_invoked())
+    def test_system_stop_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("stop", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
-    def test_system_enable_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("enable", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(_pkexec_invoked())
+    def test_system_restart_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("restart", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
-    def test_system_disable_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("disable", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(_pkexec_invoked())
+    def test_system_enable_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("enable", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
-    def test_system_mask_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("mask", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(_pkexec_invoked())
+    def test_system_disable_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("disable", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
-    def test_system_unmask_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("unmask", "nginx.service", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(_pkexec_invoked())
+    def test_system_mask_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("mask", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
-    def test_system_readonly_no_pkexec(self):
-        """System read-only (status) should NOT use pkexec."""
-        _clean_pkexec_record()
+    def test_system_unmask_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("unmask", "nginx.service", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
+
+    def test_system_readonly_invokes_systemctl_directly(self):
+        """System read-only (status) should also use systemctl directly."""
         data, ec = _run_units("status", "ssh.service", "--scope", "system")
         self.assertEqual(ec, 0)
-        self.assertFalse(_pkexec_invoked())
+        self.assertTrue(data["ok"])
 
-    def test_user_enable_no_pkexec(self):
-        _clean_pkexec_record()
+    def test_user_enable_succeeds(self):
         data, ec = _run_units("enable", "nginx.service", "--scope", "user")
         self.assertEqual(ec, 0)
-        self.assertFalse(_pkexec_invoked())
+        self.assertTrue(data["ok"])
 
 
 class TestDaemonReload(unittest.TestCase):
-    def setUp(self):
-        _clean_pkexec_record()
+    def test_daemon_reload_system_invokes_systemctl_directly(self):
+        with unittest.mock.patch.object(units, "_run") as mock_run:
+            mock_run.return_value = (0, "", "")
+            data, ec = _run_units("daemon-reload", "--scope", "system")
+            self.assertEqual(ec, 0)
+            self.assertTrue(data["ok"])
+            called_cmd = mock_run.call_args[0][0]
+            self.assertNotIn("pkexec", called_cmd)
+            self.assertIn("systemctl", called_cmd[0])
 
-    def test_daemon_reload_system_uses_pkexec(self):
-        _clean_pkexec_record()
-        data, ec = _run_units("daemon-reload", "--scope", "system")
-        self.assertEqual(ec, 0)
-        self.assertTrue(data["ok"])
-        self.assertTrue(_pkexec_invoked())
-
-    def test_daemon_reload_user_no_pkexec(self):
-        _clean_pkexec_record()
+    def test_daemon_reload_user_succeeds(self):
         data, ec = _run_units("daemon-reload", "--scope", "user")
         self.assertEqual(ec, 0)
         self.assertTrue(data["ok"])
-        self.assertFalse(_pkexec_invoked())
 
 
 class TestErrorHandling(unittest.TestCase):
-    def setUp(self):
-        _clean_pkexec_record()
-
     def test_bad_args_returns_usage(self):
         """No --scope should give exit code 2 + usage."""
         data, ec = _run_units("list")
@@ -388,7 +376,6 @@ class TestDiagnose(unittest.TestCase):
         self.assertEqual(d["helperVersion"], "0.2.0")
         self.assertIn("systemctl", d)
         self.assertIn("journalctl", d)
-        self.assertIn("pkexec", d)
         self.assertIn("canElevate", d)
         self.assertIn("scopeUser", d)
         self.assertIn("scopeSystem", d)
@@ -405,7 +392,7 @@ class TestDiagnose(unittest.TestCase):
         self.assertIsInstance(d["polkitAgent"], bool)
 
     def test_diagnose_canElevate_false_when_no_agent(self):
-        """canElevate must be False when pkexec exists but no polkit agent runs."""
+        """canElevate must be False when no polkit agent runs."""
         with unittest.mock.patch.object(units, "_polkit_agent_running", return_value=False):
             data, ec = _run_units("diagnose")
             self.assertEqual(ec, 0)
@@ -414,7 +401,7 @@ class TestDiagnose(unittest.TestCase):
             self.assertFalse(d["polkitAgent"])
 
     def test_diagnose_canElevate_true_when_agent_running(self):
-        """canElevate must be True when both pkexec and a polkit agent are present."""
+        """canElevate must be True when a polkit agent is present."""
         with unittest.mock.patch.object(units, "_polkit_agent_running", return_value=True):
             data, ec = _run_units("diagnose")
             self.assertEqual(ec, 0)
@@ -422,21 +409,12 @@ class TestDiagnose(unittest.TestCase):
             self.assertTrue(d["canElevate"])
             self.assertTrue(d["polkitAgent"])
 
-    def test_diagnose_canElevate_false_when_pkexec_missing(self):
-        """canElevate must be False when pkexec is not installed."""
-        old = os.environ.get("OSYSTEMD_PKEXEC")
-        os.environ["OSYSTEMD_PKEXEC"] = "/nonexistent/pkexec"
-        try:
-            data, ec = _run_units("diagnose")
-            self.assertEqual(ec, 0)
-            d = data["data"]
-            self.assertFalse(d["pkexec"])
-            self.assertFalse(d["canElevate"])
-        finally:
-            if old is not None:
-                os.environ["OSYSTEMD_PKEXEC"] = old
-            else:
-                del os.environ["OSYSTEMD_PKEXEC"]
+    def test_diagnose_no_pkexec_field(self):
+        """pkexec is no longer part of the diagnose output."""
+        data, ec = _run_units("diagnose")
+        self.assertEqual(ec, 0)
+        d = data["data"]
+        self.assertNotIn("pkexec", d)
 
 
 class TestTimeoutHandling(unittest.TestCase):
@@ -467,9 +445,6 @@ class TestTimeoutHandling(unittest.TestCase):
 
 
 class TestListUnitFiles(unittest.TestCase):
-    def setUp(self):
-        _clean_pkexec_record()
-
     def test_list_unit_files_system(self):
         data, ec = _run_units("list-unit-files", "--scope", "system")
         self.assertEqual(ec, 0)

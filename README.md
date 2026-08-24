@@ -14,7 +14,7 @@ files and journals — all from a compact bar widget and a rich panel UI.
 - **Unloaded Units Section** — View unit files installed on disk but not currently loaded by systemd (e.g., D-Bus-activated services like `fprintd`). Start, enable, disable, or mask them from the same panel.
 - **Unit File Viewer** — Monospace rendering of unit file contents via `systemctl cat`.
 - **Journal Peek** — Tail recent journal lines for any unit without leaving the panel.
-- **Scope Toggle** — Switch between user and system scope instantly; system mutations use polkit elevation.
+- **Scope Toggle** — Switch between user and system scope instantly; system mutations invoke `systemctl` directly (a polkit agent may prompt for authentication).
 - **Bar Indicator** — Traffic-light dot with tooltip; pulses on failures, shows count badge.
 - **Persistent Settings** — Type filters, state filters, refresh interval, and pinned units survive restarts via `settings.json`.
 
@@ -34,12 +34,14 @@ omarchy-plugin-remove io.github.rickycbanks.osystemd
 
 ## Polkit Setup
 
-System-scope mutations trigger `pkexec`, which prompts for your password by
-default. If you want to cache the authorization for the session, see
-[polkit/README.md](polkit/README.md) for an optional `.pkla` snippet.
+System-scope mutations invoke `systemctl` directly. If your user has the
+appropriate privileges, the action succeeds. Otherwise a polkit authentication
+agent in your session may prompt for a password.
 
-> **Warning:** The polkit snippet grants `pkexec` access to all executables, not
-> just `systemctl`.  Use only on single-user desktops.
+Ensure a polkit agent (e.g. `polkit-gnome` or Omarchy's built-in
+`Quickshell.Services.Polkit` agent) is running. For details and important
+security notes about previous pkexec-based elevation, see
+[polkit/README.md](polkit/README.md).
 
 ## Configuration
 

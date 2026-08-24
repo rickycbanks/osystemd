@@ -4,7 +4,6 @@
 Environment variables:
     OSYSTEMD_SYSTEMCTL   Path to systemctl (default: systemctl)
     OSYSTEMD_JOURNALCTL  Path to journalctl (default: journalctl)
-    OSYSTEMD_PKEXEC      Path to pkexec (default: pkexec)
     OSYSTEMD_STATE_DIR   Reserved for future use
 """
 
@@ -46,10 +45,6 @@ def _jctl():
     return _env("OSYSTEMD_JOURNALCTL", "journalctl")
 
 
-def _pkexec():
-    return _env("OSYSTEMD_PKEXEC", "pkexec")
-
-
 def _ok(scope, action, data):
     return json.dumps({"ok": True, "scope": scope, "action": action, "data": data})
 
@@ -69,9 +64,6 @@ def _run(cmd):
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired as exc:
-        # Capture partial output so the panel can show what the command
-        # produced before being killed (helpful when pkexec was hung waiting
-        # for a polkit agent that never appeared).
         return EXIT_TIMEOUT, (
             exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         ), (
@@ -88,9 +80,9 @@ def _run_checked(cmd, scope, action):
     ec, out, err = _run(cmd)
     if ec == EXIT_TIMEOUT:
         msg = (
-            f"{action} timed out after 30s — usually means pkexec is waiting for a "
-            f"polkit auth agent that isn't running in this session. Install one "
-            f"(e.g. polkit-gnome) and add an exec-once to start it at login."
+            f"{action} timed out after 30s — systemctl may be waiting for a "
+            f"polkit auth agent that isn't running in this session. Ensure "
+            f"one is installed (e.g. polkit-gnome) and started at login."
         )
         return _err(scope, action, "timeout", msg, (err or "").strip()), 124
     if ec == EXIT_NOT_FOUND:
@@ -139,10 +131,6 @@ def _parse_unit_files_output(text, type_filter, state_filter):
             "preset": preset,
         })
     return results
-
-
-def _needs_pkexec(scope, action):
-    return scope == "system" and action in MUTATION_ACTIONS
 
 
 # ── subcommands ──────────────────────────────────────────────────────────
@@ -411,23 +399,16 @@ def cmd_mutate(action, args, scope):
     if not args:
         return _err(scope, action, "usage", f"Missing unit name for {action}", ""), 2
     unit = args[0]
-    cmd = []
-    if _needs_pkexec(scope, action):
-        cmd.append(_pkexec())
-    cmd.extend([_ctl(), action, unit])
+    cmd = [_ctl(), action, unit]
     if scope == "user":
-        # insert --user after systemctl, before the action
-        # cmd is now [pkexec,] systemctl action unit
-        # insert --user before action
-        idx = cmd.index(_ctl()) + 1 if _ctl() in cmd else 1
-        cmd.insert(idx, "--user")
+        cmd.insert(1, "--user")
 
     ec, out, err = _run(cmd)
     if ec == EXIT_TIMEOUT:
         msg = (
-            f"{action} timed out after 30s — usually means pkexec is waiting for "
-            f"a polkit auth agent that isn't running in this session. Install "
-            f"polkit-gnome and start it via Hyprland exec-once."
+            f"{action} timed out after 30s — systemctl may be waiting for "
+            f"a polkit auth agent that isn't running in this session. Ensure "
+            f"one is installed (e.g. polkit-gnome) and started at login."
         )
         return _err(scope, action, "timeout", msg, (err or "").strip()), 124
     if ec == EXIT_NOT_FOUND or ec is None:
@@ -441,20 +422,16 @@ def cmd_mutate(action, args, scope):
 
 
 def cmd_daemon_reload(args, scope):
-    cmd = []
-    if _needs_pkexec(scope, "daemon-reload"):
-        cmd.append(_pkexec())
-    cmd.extend([_ctl(), "daemon-reload"])
+    cmd = [_ctl(), "daemon-reload"]
     if scope == "user":
-        idx = cmd.index(_ctl()) + 1 if _ctl() in cmd else 1
-        cmd.insert(idx, "--user")
+        cmd.insert(1, "--user")
 
     ec, out, err = _run(cmd)
     if ec == EXIT_TIMEOUT:
         msg = (
-            f"daemon-reload timed out after 30s — usually means pkexec is waiting "
-            f"for a polkit auth agent that isn't running in this session. Install "
-            f"polkit-gnome and start it via Hyprland exec-once."
+            f"daemon-reload timed out after 30s — systemctl may be waiting "
+            f"for a polkit auth agent that isn't running in this session. "
+            f"Ensure one is installed (e.g. polkit-gnome) and started at login."
         )
         return _err(scope, "daemon-reload", "timeout", msg, (err or "").strip()), 124
     if ec == EXIT_NOT_FOUND or ec is None:
@@ -462,28 +439,25 @@ def cmd_daemon_reload(args, scope):
                      f"Binary not found: {cmd[0]}", err), 3
     if ec != 0:
         return _err(scope, "daemon-reload", "command_failed",
-                     f"daemon-reload failed (exit {ec})", (err or "").strip()), 1
+                     f"daemon-reload failed (exit {ec})", err.strip()), 1
 
     return _ok(scope, "daemon-reload", {}), 0
 
 
 def cmd_diagnose():
     import platform
-    pkexec_available = _bin_check(_pkexec())
     polkit_agent_ok = _polkit_agent_running()
     data = {
         "pythonVersion": platform.python_version(),
         "helperVersion": __version__,
         "systemctl":     _bin_check(_ctl()),
         "journalctl":    _bin_check(_jctl()),
-        "pkexec":        pkexec_available,
         "polkitAgent":   polkit_agent_ok,
         "scopeUser":     True,
         "scopeSystem":   True,
-        # canElevate is True only when both pkexec AND a polkit agent are
-        # available. If pkexec exists but no agent is registered, canElevate
-        # stays False so the UI doesn't lie — mutations will hang otherwise.
-        "canElevate":    pkexec_available and polkit_agent_ok,
+        # canElevate indicates that a polkit auth agent is available for
+        # system-scope mutations that may require authentication.
+        "canElevate":    polkit_agent_ok,
     }
     return _ok(None, "diagnose", data), 0
 
