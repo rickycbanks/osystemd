@@ -572,7 +572,7 @@ Panel {
                                         // Warning for system scope without elevation
                                         Text {
                                             visible: root.panelScope === "system" && !root.panelCanElevate
-                                            text: "pkexec not available \u2014 system mutations will fail"
+                                            text: "Polkit agent not detected \u2014 system mutations may require authentication"
                                             font.pixelSize: Style.font.bodySmall
                                             color: _warnColor
                                         }
@@ -625,7 +625,7 @@ Panel {
                                                             if (!btnEnabled) {
                                                                 if (model.action === "stop") return "Unit is not active \u2014 nothing to stop";
                                                                 if (root.panelScope === "system" && !root.panelCanElevate)
-                                                                    return "Requires polkit authentication \u2014 install polkit-gnome and start it via Hyprland exec-once";
+                                                                    return "Requires polkit authentication \u2014 ensure a polkit agent is running (e.g. polkit-gnome)";
                                                                 return "Not available";
                                                             }
                                                             return model.label + " \u2014 " + (model.action === "daemon-reload" ? "reload systemd manager configuration" : model.action + " this unit");

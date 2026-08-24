@@ -1,41 +1,54 @@
-# polkit — Optional Elevation Rules
+# polkit — System-Scope Authorization
 
-By default, **osystemd** invokes `pkexec` for system-scope mutations (start,
-stop, enable, disable, mask, unmask, daemon-reload). This triggers a graphical
-password prompt each time — the standard polkit behaviour.
+System-scope mutations (start, stop, enable, disable, mask, unmask, daemon-reload)
+invoke `systemctl` directly. If your user has sufficient privileges (e.g. is in
+the `wheel` / `sudo` group with an appropriate polkit rule, or systemd's built-in
+user/group checks allow the operation), the action succeeds. Otherwise systemd
+itself will trigger a polkit authentication prompt via the session's polkit agent.
 
-## Optional: Passwordless (cached) elevation
+## Previous versions used pkexec
 
-If you trust the logged-in user and want the password prompt only once per
-session, you can install a polkit rule that caches the authorization.
+Earlier releases of osystemd wrapped system-scope `systemctl` calls with
+`pkexec`, which shells out to `org.freedesktop.policykit.exec`. A
+`.pkla`-file example was included in this directory that granted unconditional
+`ResultAny=yes` for `Action=org.freedesktop.policykit.exec` with `Identity=*`.
 
-Create the file `/etc/polkit-1/localauthority/50-local.d/osystemd.pkla`:
+**That policy must be removed if you installed it.** The file is typically at:
 
-```ini
-[Allow osystemd systemctl mutations]
-Identity=*
-Action=org.freedesktop.policykit.exec
-ResultAny=yes
-ResultInactive=yes
-ResultActive=yes
+```
+/etc/polkit-1/localauthority/50-local.d/osystemd.pkla
 ```
 
-### Why we don't ship this by default
+Removing the dangerous `.pkla` or its JavaScript equivalent is critical because:
 
-- The `.pkla` snippet grants `pkexec` access to **all** executables, not just
-  `systemctl`.  It is a blunt instrument.
-- Security-sensitive systems (shared workstations, CI boxes) should keep the
-  default prompt-for-password behavior.
-- Some distributions have migrated from `.pkla` files to JavaScript rules
-  (`/etc/polkit-1/rules.d/`).  The snippet above works on Debian/Ubuntu and
-  older Fedora/RHEL; check your distro's polkit documentation for the
-  equivalent rule syntax.
+- `org.freedesktop.policykit.exec` authorises **any** program the invoking user
+  chooses to run via `pkexec`, not merely `systemctl`. A user with this rule can
+  execute arbitrary commands as root — it is not a narrowly scoped osystemd
+  authorization.
+- Caching a passwordless grant for `org.freedesktop.policykit.exec` with
+  `Identity=*` effectively gives every local user unrestricted root access for
+  the duration of the session.
 
-### Security / UX tradeoff
+## Why no passwordless policy rule
 
-| Setting          | Security          | UX          |
-|------------------|-------------------|-------------|
-| Default (prompt) | Full sudo gate    | Password on each action |
-| `.pkla` above    | Session-cached    | Prompt once, then cached |
+A polkit rule for the current `systemctl` command form cannot safely constrain
+arguments. The `pkexec` action (`org.freedesktop.policykit.exec`) is
+action-generic — polkit sees only the executable name and the action ID, not
+the full argument vector. Any rule that grants `org.freedesktop.policykit.exec`
+unconditionally authorises arbitrary pkexec invocations, not just the intended
+`systemctl start nginx.service`.
 
-Choose based on your threat model.
+## Recommended approach
+
+Use your desktop environment's normal polkit authentication:
+
+- Ensure a polkit authentication agent is running in your session (e.g.
+  `polkit-gnome`, `polkit-kde-agent`, or Omarchy's built-in
+  `Quickshell.Services.Polkit` agent).
+- For passwordless operation, configure a polkit rule scoped to a **specific
+  system unit** via a custom `.rules` or `.pkla` file that matches the unit
+  name in the action details — not the generic `pkexec` action. Consult your
+  distribution's polkit documentation for the correct rule format.
+
+Do **not** grant `org.freedesktop.policykit.exec` unconditionally or with
+`Identity=*`.
