@@ -2,8 +2,10 @@
 """unittest suite for units.py using stub overrides."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 
@@ -258,7 +260,7 @@ class TestMutations(unittest.TestCase):
     def test_system_start_invokes_systemctl_directly(self):
         """System-scope mutations must invoke systemctl directly, not pkexec."""
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("start", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self.assertTrue(data["ok"])
@@ -266,42 +268,42 @@ class TestMutations(unittest.TestCase):
 
     def test_system_stop_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("stop", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
     def test_system_restart_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("restart", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
     def test_system_enable_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("enable", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
     def test_system_disable_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("disable", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
     def test_system_mask_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("mask", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
 
     def test_system_unmask_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("unmask", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 0)
             self._assert_invokes_systemctl_not_pkexec(mock_run, "system")
@@ -321,7 +323,7 @@ class TestMutations(unittest.TestCase):
 class TestDaemonReload(unittest.TestCase):
     def test_daemon_reload_system_invokes_systemctl_directly(self):
         with unittest.mock.patch.object(units, "_run") as mock_run:
-            mock_run.return_value = (0, "", "")
+            mock_run.return_value = (0, "", "", None)
             data, ec = _run_units("daemon-reload", "--scope", "system")
             self.assertEqual(ec, 0)
             self.assertTrue(data["ok"])
@@ -421,7 +423,8 @@ class TestTimeoutHandling(unittest.TestCase):
     """Tests that EXIT_TIMEOUT surfaces as a 'timeout' error code."""
 
     def test_mutate_timeout_returns_timeout_error(self):
-        with unittest.mock.patch.object(units, "_run", return_value=(units.EXIT_TIMEOUT, "", "")):
+        with unittest.mock.patch.object(units, "_run",
+                                        return_value=(units.EXIT_TIMEOUT, "", "", None)):
             data, ec = _run_units("start", "nginx.service", "--scope", "system")
             self.assertEqual(ec, 124)
             self.assertFalse(data["ok"])
@@ -429,7 +432,8 @@ class TestTimeoutHandling(unittest.TestCase):
             self.assertIn("polkit auth agent", data["error"]["message"])
 
     def test_daemon_reload_timeout_returns_timeout_error(self):
-        with unittest.mock.patch.object(units, "_run", return_value=(units.EXIT_TIMEOUT, "", "")):
+        with unittest.mock.patch.object(units, "_run",
+                                        return_value=(units.EXIT_TIMEOUT, "", "", None)):
             data, ec = _run_units("daemon-reload", "--scope", "system")
             self.assertEqual(ec, 124)
             self.assertFalse(data["ok"])
@@ -437,7 +441,8 @@ class TestTimeoutHandling(unittest.TestCase):
             self.assertIn("polkit auth agent", data["error"]["message"])
 
     def test_run_checked_timeout_returns_timeout_error(self):
-        with unittest.mock.patch.object(units, "_run", return_value=(units.EXIT_TIMEOUT, "", "")):
+        with unittest.mock.patch.object(units, "_run",
+                                        return_value=(units.EXIT_TIMEOUT, "", "", None)):
             data, ec = _run_units("status", "ssh.service", "--scope", "user")
             self.assertEqual(ec, 124)
             self.assertFalse(data["ok"])
@@ -495,6 +500,500 @@ class TestListUnitFiles(unittest.TestCase):
         self.assertEqual(ec, 2)
         self.assertFalse(data["ok"])
         self.assertEqual(data["error"]["code"], "usage")
+
+
+# ── Output-bounds and overflow regression tests ────────────────────────
+
+
+class TestOutputBounds(unittest.TestCase):
+    """Thorough regression tests for output boundaries, overflow, envelope
+    behaviour, process cleanup, and JSON cap."""
+
+    def setUp(self):
+        self._old_ctl = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        self._old_jctl = os.environ.get("OSYSTEMD_JOURNALCTL")
+        os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "systemctl.py")
+        os.environ["OSYSTEMD_JOURNALCTL"] = os.path.join(STUBS_DIR, "journalctl.py")
+
+    def tearDown(self):
+        if self._old_ctl is not None:
+            os.environ["OSYSTEMD_SYSTEMCTL"] = self._old_ctl
+        else:
+            os.environ.pop("OSYSTEMD_SYSTEMCTL", None)
+        if self._old_jctl is not None:
+            os.environ["OSYSTEMD_JOURNALCTL"] = self._old_jctl
+        else:
+            os.environ.pop("OSYSTEMD_JOURNALCTL", None)
+
+    # ── _run() direct tests — overflow ─────────────────────────────────
+
+    def test_stdout_overflow_returns_overflow_code(self):
+        """Command producing >256 KiB stdout triggers EXIT_OUTPUT_OVERFLOW."""
+        stub = os.path.join(STUBS_DIR, "big_stdout.py")
+        ec, out, err, overflow = units._run([sys.executable, stub])
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertEqual(out, "")
+        self.assertEqual(err, "")
+        self.assertIsNotNone(overflow)
+        self.assertTrue(overflow[0])   # stdout_truncated
+        self.assertFalse(overflow[1])  # stderr_truncated
+
+    def test_stderr_overflow_returns_overflow_code(self):
+        """Command producing >64 KiB stderr triggers EXIT_OUTPUT_OVERFLOW."""
+        stub = os.path.join(STUBS_DIR, "big_stderr.py")
+        ec, out, err, overflow = units._run([sys.executable, stub])
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertEqual(out, "")
+        self.assertEqual(err, "")
+        self.assertIsNotNone(overflow)
+        self.assertFalse(overflow[0])  # stdout_truncated
+        self.assertTrue(overflow[1])   # stderr_truncated
+
+    def test_both_streams_overflow_no_deadlock(self):
+        """Both streams exceeding limits simultaneously must not deadlock."""
+        stub = os.path.join(STUBS_DIR, "big_both.py")
+        ec, out, err, overflow = units._run([sys.executable, stub])
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertIsNotNone(overflow)
+        # At least one stream must have been truncated
+        self.assertTrue(overflow[0] or overflow[1])
+
+    def test_no_partial_data_on_stdout_overflow(self):
+        """Overflow must never return successful partial data."""
+        stub = os.path.join(STUBS_DIR, "big_stdout.py")
+        ec, out, err, overflow = units._run([sys.executable, stub])
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertEqual(out, "")
+        self.assertEqual(err, "")
+
+    def test_no_partial_data_on_stderr_overflow(self):
+        """Overflow must never return successful partial data."""
+        stub = os.path.join(STUBS_DIR, "big_stderr.py")
+        ec, out, err, overflow = units._run([sys.executable, stub])
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertEqual(out, "")
+        self.assertEqual(err, "")
+
+    def test_normal_command_succeeds(self):
+        """Normal command invocation still works with the bounded collector."""
+        ec, out, err, overflow = units._run(
+            [sys.executable, os.path.join(STUBS_DIR, "systemctl.py"),
+             "start", "test"]
+        )
+        self.assertEqual(ec, 0)
+        self.assertIsNone(overflow)
+        self.assertIsInstance(out, str)
+        self.assertIsInstance(err, str)
+
+    def test_file_not_found_returns_not_found(self):
+        """Non-existent binary returns EXIT_NOT_FOUND."""
+        ec, out, err, overflow = units._run(["/nonexistent/binary"])
+        self.assertEqual(ec, units.EXIT_NOT_FOUND)
+        self.assertIsNone(overflow)
+        self.assertIn("not found", err)
+
+    # ── Exact-boundary success (defect 1 regression) ───────────────────
+
+    def test_exact_boundary_stdout_success(self):
+        """Exactly STDOUT_LIMIT bytes of stdout must succeed, not overflow."""
+        stub = os.path.join(STUBS_DIR, "exact_bytes.py")
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub, str(units.STDOUT_LIMIT)]
+        )
+        self.assertEqual(ec, 0)
+        self.assertIsNone(overflow)
+        self.assertEqual(len(out.encode("utf-8")), units.STDOUT_LIMIT)
+
+    def test_exact_boundary_stderr_success(self):
+        """Exactly STDERR_LIMIT bytes of stderr must succeed, not overflow."""
+        stub = os.path.join(STUBS_DIR, "exact_bytes.py")
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub, str(units.STDERR_LIMIT), "stderr"]
+        )
+        self.assertEqual(ec, 0)
+        self.assertIsNone(overflow)
+        self.assertEqual(len(err.encode("utf-8")), units.STDERR_LIMIT)
+
+    def test_limit_plus_one_stdout_overflow(self):
+        """STDOUT_LIMIT + 1 bytes must trigger overflow."""
+        stub = os.path.join(STUBS_DIR, "exact_bytes.py")
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub, str(units.STDOUT_LIMIT + 1)]
+        )
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertEqual(out, "")
+        self.assertIsNotNone(overflow)
+        self.assertTrue(overflow[0])
+
+    def test_limit_plus_one_stderr_overflow(self):
+        """STDERR_LIMIT + 1 bytes must trigger overflow."""
+        stub = os.path.join(STUBS_DIR, "exact_bytes.py")
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub, str(units.STDERR_LIMIT + 1), "stderr"]
+        )
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertEqual(err, "")
+        self.assertIsNotNone(overflow)
+        self.assertTrue(overflow[1])
+
+    def test_exact_boundary_both_streams_success(self):
+        """Exactly at both limits simultaneously must succeed."""
+        stub = os.path.join(STUBS_DIR, "exact_both.py")
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub,
+             str(units.STDOUT_LIMIT), str(units.STDERR_LIMIT)]
+        )
+        self.assertEqual(ec, 0)
+        self.assertIsNone(overflow)
+        self.assertEqual(len(out.encode("utf-8")), units.STDOUT_LIMIT)
+        self.assertEqual(len(err.encode("utf-8")), units.STDERR_LIMIT)
+
+    def test_both_streams_overflow_simultaneous(self):
+        """Both streams over limit simultaneously triggers overflow, no deadlock.
+
+        Independently-scheduled concurrent writers cannot reliably make both
+        stream flags true after an immediate process-group kill, so we assert
+        that at least one overflow is observed (not necessarily both).
+        """
+        import time
+        stub = os.path.join(STUBS_DIR, "exact_both.py")
+        t0 = time.monotonic()
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub,
+             str(units.STDOUT_LIMIT + 1024),
+             str(units.STDERR_LIMIT + 1024)]
+        )
+        elapsed = time.monotonic() - t0
+        self.assertEqual(ec, units.EXIT_OUTPUT_OVERFLOW)
+        self.assertIsNotNone(overflow)
+        # At least one stream must have been flagged as truncated.
+        self.assertTrue(overflow[0] or overflow[1])
+        # Overflow must never return partial data.
+        self.assertEqual(out, "")
+        self.assertEqual(err, "")
+        # Must complete promptly — no deadlock.
+        self.assertLess(elapsed, 5.0,
+                        f"Simultaneous overflow took {elapsed:.2f}s — possible deadlock")
+
+    def test_overflow_reported_when_drain_lingers(self):
+        """Overflow must be reported even if the reader drain never completes.
+
+        The overflow flag is published in state[2] before the drain loop
+        begins, so even if the reader thread is stuck draining after the
+        5-second join timeout, the main thread still sees overflow.
+        """
+        import io
+
+        # Build a pipe pair; write from a thread because writing 257 KiB
+        # to a 64 KiB pipe buffer blocks until the reader drains.
+        r_fd, w_fd = os.pipe()
+
+        state = [[], 0, False]
+        # Use a fake proc; mock _kill_process_group so it does not
+        # actually signal the test runner's own process group.
+        proc = unittest.mock.MagicMock()
+        proc.pid = -1  # invalid PID, but kill is mocked away
+
+        pipe = io.FileIO(r_fd, mode="rb", closefd=True)
+
+        def writer():
+            os.write(w_fd, b"x" * (units.STDOUT_LIMIT + 1))
+            os.close(w_fd)
+
+        with unittest.mock.patch.object(units, "_kill_process_group"):
+            wt = threading.Thread(target=writer)
+            wt.start()
+
+            t = threading.Thread(
+                target=units._read_stream,
+                args=(pipe, state, units.STDOUT_LIMIT, proc),
+            )
+            t.start()
+            # Join with a short timeout to simulate lingering drain.
+            t.join(timeout=0.1)
+
+            # The overflow flag must already be visible, even though the
+            # drain loop may still be running.
+            self.assertTrue(state[2],
+                            "state[2] (truncated) must be True before drain completes")
+            self.assertGreaterEqual(state[1], units.STDOUT_LIMIT)
+
+            # Let both threads finish cleanly.
+            wt.join(timeout=5)
+            t.join(timeout=5)
+
+    def test_small_output_succeeds(self):
+        """Small output well under limits succeeds promptly."""
+        stub = os.path.join(STUBS_DIR, "exact_bytes.py")
+        ec, out, err, overflow = units._run(
+            [sys.executable, stub, "100"]
+        )
+        self.assertEqual(ec, 0)
+        self.assertIsNone(overflow)
+        self.assertEqual(len(out.encode("utf-8")), 100)
+
+    # ── Prompt normal completion (defect 2 regression) ──────────────────
+
+    def test_normal_completion_is_prompt(self):
+        """Normal _run() must return promptly (no 2-second watcher delay)."""
+        import time
+        t0 = time.monotonic()
+        ec, out, err, overflow = units._run(
+            [sys.executable, os.path.join(STUBS_DIR, "systemctl.py"),
+             "start", "test"]
+        )
+        elapsed = time.monotonic() - t0
+        self.assertEqual(ec, 0)
+        self.assertIsNone(overflow)
+        # The old bug added ~2s from _watch_overflow thread join.
+        # A normal command should finish in well under 1 second.
+        self.assertLess(elapsed, 1.0,
+                        f"Normal _run took {elapsed:.2f}s — possible watcher delay")
+
+    def test_prompt_completion_via_cli(self):
+        """CLI list must also return promptly (no accumulated watcher delays)."""
+        import time
+        t0 = time.monotonic()
+        data, ec = _run_units("list", "--scope", "user")
+        elapsed = time.monotonic() - t0
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+        self.assertLess(elapsed, 2.0,
+                        f"CLI list took {elapsed:.2f}s — possible watcher delay")
+
+    # ── _run_checked() overflow envelope ───────────────────────────────
+
+    def test_run_checked_stdout_overflow_produces_envelope(self):
+        """_run_checked produces output_limit_exceeded envelope on overflow."""
+        stub = os.path.join(STUBS_DIR, "big_stdout.py")
+        json_str, ec = units._run_checked(
+            [sys.executable, stub], "system", "list"
+        )
+        self.assertEqual(ec, 1)
+        data = json.loads(json_str)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+        self.assertTrue(data["error"]["stdoutTruncated"])
+        self.assertFalse(data["error"]["stderrTruncated"])
+
+    def test_run_checked_stderr_overflow_produces_envelope(self):
+        """_run_checked produces correct flags for stderr overflow."""
+        stub = os.path.join(STUBS_DIR, "big_stderr.py")
+        json_str, ec = units._run_checked(
+            [sys.executable, stub], "system", "journal"
+        )
+        self.assertEqual(ec, 1)
+        data = json.loads(json_str)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+        self.assertFalse(data["error"]["stdoutTruncated"])
+        self.assertTrue(data["error"]["stderrTruncated"])
+
+    # ── CLI-level overflow handling ────────────────────────────────────
+
+    def test_list_overflow_via_cli(self):
+        """CLI list command handles overflow gracefully."""
+        old = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "big_stdout.py")
+        try:
+            data, ec = _run_units("list", "--scope", "user")
+            self.assertEqual(ec, 1)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+            self.assertTrue(data["error"]["stdoutTruncated"])
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_SYSTEMCTL"] = old
+            else:
+                os.environ.pop("OSYSTEMD_SYSTEMCTL", None)
+
+    def test_mutate_overflow_via_cli(self):
+        """CLI mutate command handles overflow gracefully."""
+        old = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "big_stdout.py")
+        try:
+            data, ec = _run_units("start", "x.service", "--scope", "system")
+            self.assertEqual(ec, 1)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_SYSTEMCTL"] = old
+            else:
+                os.environ.pop("OSYSTEMD_SYSTEMCTL", None)
+
+    def test_daemon_reload_overflow_via_cli(self):
+        """CLI daemon-reload command handles overflow gracefully."""
+        old = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "big_stdout.py")
+        try:
+            data, ec = _run_units("daemon-reload", "--scope", "system")
+            self.assertEqual(ec, 1)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_SYSTEMCTL"] = old
+            else:
+                os.environ.pop("OSYSTEMD_SYSTEMCTL", None)
+
+    def test_list_unit_files_overflow_via_cli(self):
+        """CLI list-unit-files command handles overflow gracefully."""
+        old = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "big_stdout.py")
+        try:
+            data, ec = _run_units("list-unit-files", "--scope", "system")
+            self.assertEqual(ec, 1)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_SYSTEMCTL"] = old
+            else:
+                os.environ.pop("OSYSTEMD_SYSTEMCTL", None)
+
+    def test_status_overflow_via_cli(self):
+        """CLI status (via _run_checked) handles overflow gracefully."""
+        old = os.environ.get("OSYSTEMD_SYSTEMCTL")
+        os.environ["OSYSTEMD_SYSTEMCTL"] = os.path.join(STUBS_DIR, "big_stdout.py")
+        try:
+            data, ec = _run_units("status", "ssh.service", "--scope", "user")
+            self.assertEqual(ec, 1)
+            self.assertFalse(data["ok"])
+            self.assertEqual(data["error"]["code"], "output_limit_exceeded")
+        finally:
+            if old is not None:
+                os.environ["OSYSTEMD_SYSTEMCTL"] = old
+            else:
+                os.environ.pop("OSYSTEMD_SYSTEMCTL", None)
+
+    # ── JSON cap tests ─────────────────────────────────────────────────
+
+    def test_cap_output_small_unchanged(self):
+        """_cap_output passes through small JSON unchanged."""
+        small = json.dumps({"ok": True, "data": "hello"})
+        self.assertEqual(units._cap_output(small), small)
+
+    def test_cap_output_replaces_large_json(self):
+        """_cap_output replaces oversized JSON with response_too_large."""
+        large = json.dumps({"ok": True, "data": "x" * (units.JSON_LIMIT + 1024)})
+        capped = units._cap_output(large)
+        self.assertLessEqual(len(capped.encode("utf-8")), units.JSON_LIMIT)
+        data = json.loads(capped)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"]["code"], "response_too_large")
+
+    def test_cap_output_boundary_just_under_limit(self):
+        """JSON at exactly the limit is passed through."""
+        payload = {"ok": True, "data": "a" * (units.JSON_LIMIT - 100)}
+        text = json.dumps(payload)
+        # May exceed limit due to JSON encoding overhead, but should
+        # pass through if within the limit
+        if len(text.encode("utf-8")) <= units.JSON_LIMIT:
+            self.assertEqual(units._cap_output(text), text)
+
+    def test_main_output_is_capped(self):
+        """Verify main() wraps all output paths with _cap_output."""
+        with unittest.mock.patch.object(units, "_cap_output",
+                                       wraps=units._cap_output) as mock_cap:
+            _run_units("list", "--scope", "user")
+            self.assertTrue(mock_cap.called)
+
+    # ── Overflow flags correctness ─────────────────────────────────────
+
+    def test_overflow_envelope_has_both_flags(self):
+        """Overflow envelope always includes stdoutTruncated and stderrTruncated."""
+        stub = os.path.join(STUBS_DIR, "big_stdout.py")
+        json_str, ec = units._run_checked(
+            [sys.executable, stub], "user", "status"
+        )
+        data = json.loads(json_str)
+        self.assertIn("stdoutTruncated", data["error"])
+        self.assertIn("stderrTruncated", data["error"])
+        self.assertIsInstance(data["error"]["stdoutTruncated"], bool)
+        self.assertIsInstance(data["error"]["stderrTruncated"], bool)
+
+    # ── _err_overflow envelope shape ───────────────────────────────────
+
+    def test_err_overflow_json_shape(self):
+        """_err_overflow produces correct JSON envelope shape."""
+        envelope = json.loads(units._err_overflow("system", "start", True, False))
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["scope"], "system")
+        self.assertEqual(envelope["action"], "start")
+        err = envelope["error"]
+        self.assertEqual(err["code"], "output_limit_exceeded")
+        self.assertIn("protocol budget", err["message"])
+        self.assertTrue(err["stdoutTruncated"])
+        self.assertFalse(err["stderrTruncated"])
+        self.assertEqual(err["stderr"], "")
+
+    def test_err_overflow_both_truncated(self):
+        """_err_overflow handles both-truncated case."""
+        envelope = json.loads(units._err_overflow("user", "list", True, True))
+        self.assertTrue(envelope["error"]["stdoutTruncated"])
+        self.assertTrue(envelope["error"]["stderrTruncated"])
+
+    # ── Process group kill (timeout path) ──────────────────────────────
+
+    def test_timeout_kills_process_group(self):
+        """On timeout, the child process group must be killed."""
+        with unittest.mock.patch.object(units, "_kill_process_group",
+                                        wraps=units._kill_process_group) as mock_kill:
+            # Use a command that sleeps forever so proc.wait() blocks
+            ec, out, err, overflow = units._run(
+                [sys.executable, "-c",
+                 "import time; time.sleep(300)"]
+            )
+            self.assertEqual(ec, units.EXIT_TIMEOUT)
+            mock_kill.assert_called()
+
+    # ── Constants sanity ───────────────────────────────────────────────
+
+    def test_constants_are_positive_and_ordered(self):
+        """Sanity check on ceiling constants."""
+        self.assertGreater(units.STDOUT_LIMIT, 0)
+        self.assertGreater(units.STDERR_LIMIT, 0)
+        self.assertGreater(units.JSON_LIMIT, 0)
+        self.assertGreaterEqual(units.JSON_LIMIT, units.STDOUT_LIMIT)
+        self.assertGreaterEqual(units.JSON_LIMIT, units.STDERR_LIMIT)
+        self.assertGreater(units.RUN_TIMEOUT, 0)
+
+    def test_exit_codes_are_negative(self):
+        """Sentinel exit codes must be negative to avoid clashing with real codes."""
+        self.assertLess(units.EXIT_NOT_FOUND, 0)
+        self.assertLess(units.EXIT_TIMEOUT, 0)
+        self.assertLess(units.EXIT_OUTPUT_OVERFLOW, 0)
+        self.assertNotEqual(units.EXIT_NOT_FOUND, units.EXIT_TIMEOUT)
+        self.assertNotEqual(units.EXIT_TIMEOUT, units.EXIT_OUTPUT_OVERFLOW)
+
+    # ── Existing behaviour preserved ───────────────────────────────────
+
+    def test_normal_list_still_works(self):
+        """Normal list invocation through CLI is unaffected."""
+        data, ec = _run_units("list", "--scope", "user")
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+        self.assertGreater(len(data["data"]["units"]), 0)
+
+    def test_normal_diagnose_still_works(self):
+        """Normal diagnose invocation through CLI is unaffected."""
+        data, ec = _run_units("diagnose")
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+
+    def test_normal_mutate_still_works(self):
+        """Normal mutation through CLI is unaffected."""
+        data, ec = _run_units("start", "nginx.service", "--scope", "user")
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+
+    def test_normal_status_still_works(self):
+        """Normal status through CLI is unaffected."""
+        data, ec = _run_units("status", "ssh.service", "--scope", "user")
+        self.assertEqual(ec, 0)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["data"]["unit"], "ssh.service")
 
 
 if __name__ == "__main__":
