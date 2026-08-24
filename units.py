@@ -10,8 +10,11 @@ Environment variables:
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import threading
+import time
 
 __version__ = "0.2.0"
 
@@ -26,9 +29,18 @@ MUTATION_ACTIONS = frozenset({
 })
 
 # Sentinel exit codes returned from _run so callers can distinguish
-# "command not found" from "command timed out" from "real non-zero exit".
-EXIT_TIMEOUT = -2
+# "command not found" from "command timed out" from "output overflow"
+# from "real non-zero exit".
 EXIT_NOT_FOUND = -1
+EXIT_TIMEOUT = -2
+EXIT_OUTPUT_OVERFLOW = -3
+
+# Output ceilings (bytes).  The helper-to-QML JSON protocol must stay
+# within a single write; the QML side enforces the same JSON_LIMIT.
+STDOUT_LIMIT = 256 * 1024    # 256 KiB — generous for systemctl output
+STDERR_LIMIT = 64 * 1024     #  64 KiB — stderr is rarely large
+JSON_LIMIT = 512 * 1024      # 512 KiB — hard cap on final JSON payload
+RUN_TIMEOUT = 30             # seconds
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -58,26 +70,223 @@ def _err(scope, action, code, message, stderr=""):
     })
 
 
-def _run(cmd):
-    """Run a command, return (exitcode, stdout, stderr)."""
+def _err_overflow(scope, action, stdout_truncated, stderr_truncated):
+    """Return an ``output_limit_exceeded`` JSON envelope with stream flags."""
+    return json.dumps({
+        "ok": False,
+        "scope": scope,
+        "action": action,
+        "error": {
+            "code": "output_limit_exceeded",
+            "message": "Command output exceeded the protocol budget",
+            "stderr": "",
+            "stdoutTruncated": bool(stdout_truncated),
+            "stderrTruncated": bool(stderr_truncated),
+        },
+    })
+
+
+def _cap_output(text):
+    """Ensure *text* (a JSON string) does not exceed JSON_LIMIT bytes.
+
+    If it does, replace it with a minimal ``response_too_large`` error so
+    duplicated/escaped command data never blows past the helper→QML budget.
+    """
+    if len(text.encode("utf-8")) <= JSON_LIMIT:
+        return text
+    return json.dumps({
+        "ok": False,
+        "scope": None,
+        "action": "",
+        "error": {
+            "code": "response_too_large",
+            "message": "Response exceeded the protocol budget",
+            "stderr": "",
+        },
+    })
+
+
+# ── bounded command runner ───────────────────────────────────────────────
+
+def _kill_process_group(proc):
+    """Send SIGKILL to *proc* and its entire process group (Linux).
+
+    Falls back to ``proc.kill()`` if the group kill fails.  Does **not**
+    wait for exit — the main thread handles reaping via ``proc.wait()``.
+    Thread-safe and idempotent (safe to call from multiple reader threads).
+    """
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return r.returncode, r.stdout, r.stderr
-    except subprocess.TimeoutExpired as exc:
-        return EXIT_TIMEOUT, (
-            exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        ), (
-            exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            pass
+
+
+def _read_stream(pipe, state, limit, proc):
+    """Read up to *limit* bytes from *pipe* into *state*.
+
+    *state* is a list ``[chunks_list, total_bytes, truncated_flag]`` that
+    is mutated in place so the caller can inspect it from another thread.
+
+    When the accumulated bytes reach *limit*, a single-byte probe is issued
+    to distinguish **exactly-limit + EOF** (success) from **more-than-limit**
+    (overflow).  On overflow the child process group is killed immediately
+    and the remaining pipe data is drained so the child never blocks on a
+    full write buffer.
+
+    At most one extra byte beyond *limit* is ever retained.
+    """
+    chunks, total, truncated = state
+    try:
+        # ── Phase 1: fill up to the byte ceiling ──────────────────────
+        while total < limit:
+            chunk = pipe.read(min(limit - total, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+
+        # ── Phase 2: single-byte probe to disambiguate EOF vs overflow ─
+        if total >= limit:
+            try:
+                probe = pipe.read(1)
+            except (OSError, ValueError):
+                probe = b""
+            if probe:
+                # More data beyond the limit → overflow.
+                truncated = True
+                # Publish overflow immediately so the main thread can
+                # observe it even if the drain loop hangs or the join
+                # timeout expires before _read_stream returns.
+                state[2] = True
+                # Kill the child first so the pipe gets EOF quickly.
+                _kill_process_group(proc)
+                # Drain remaining data (bounded by kernel pipe buffer)
+                # so the child never blocks on a full pipe.
+                try:
+                    while True:
+                        extra = pipe.read(65536)
+                        if not extra:
+                            break
+                except (OSError, ValueError):
+                    pass
+            # else: probe == b"" → EOF at exactly limit → success
+    except (OSError, ValueError):
+        pass
+    state[1] = total
+    state[2] = truncated
+
+
+def _run(cmd):
+    """Run *cmd* with bounded, concurrent stdout/stderr collection.
+
+    Returns ``(exitcode, stdout, stderr, overflow_flags)``:
+
+    * *overflow_flags* is ``None`` in the normal case, or a tuple
+      ``(stdout_truncated, stderr_truncated)`` when either stream hits
+      its ceiling.
+
+    Behaviour:
+
+    * **Normal exit** — returns ``(returncode, stdout, stderr, None)``.
+    * **Timeout** — kills the process group, returns ``(EXIT_TIMEOUT,
+      partial_stdout, partial_stderr, None)``.
+    * **Output overflow** — kills the process group, returns
+      ``(EXIT_OUTPUT_OVERFLOW, "", "", flags)``.  Never returns
+      successful partial data.
+
+    Uses non-blocking concurrent pipe reads (via threads) so stdout and
+    stderr are drained simultaneously — no pipe deadlock.
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,  # own process group for clean group-kill
         )
     except FileNotFoundError:
-        return EXIT_NOT_FOUND, "", f"{cmd[0]}: not found"
+        return EXIT_NOT_FOUND, "", f"{cmd[0]}: not found", None
     except Exception as exc:
-        return EXIT_NOT_FOUND, "", str(exc)
+        return EXIT_NOT_FOUND, "", str(exc), None
+
+    stdout_state = [[], 0, False]
+    stderr_state = [[], 0, False]
+
+    t_out = threading.Thread(
+        target=_read_stream,
+        args=(proc.stdout, stdout_state, STDOUT_LIMIT, proc),
+        daemon=True,
+    )
+    t_err = threading.Thread(
+        target=_read_stream,
+        args=(proc.stderr, stderr_state, STDERR_LIMIT, proc),
+        daemon=True,
+    )
+    t_out.start()
+    t_err.start()
+
+    # Poll proc.wait() so we can react to timeout.  Overflow is handled
+    # directly by the reader threads (they kill the process group), so
+    # the main thread only needs to watch the deadline.
+    timed_out = False
+    deadline = time.monotonic() + RUN_TIMEOUT
+    while True:
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                _kill_process_group(proc)
+                break
+            proc.wait(timeout=min(remaining, 0.5))
+            break  # process exited normally
+        except subprocess.TimeoutExpired:
+            # Check if a reader thread already killed the process on
+            # overflow — if so, the next poll will succeed.
+            pass
+
+    # Wait for reader threads to finish (they should be nearly done; the
+    # process is dead so pipes will reach EOF promptly).
+    t_out.join(timeout=5)
+    t_err.join(timeout=5)
+
+    # Close pipes to release file descriptors promptly.
+    try:
+        proc.stdout.close()
+    except Exception:
+        pass
+    try:
+        proc.stderr.close()
+    except Exception:
+        pass
+
+    stdout_truncated = stdout_state[2]
+    stderr_truncated = stderr_state[2]
+
+    stdout_str = b"".join(stdout_state[0]).decode("utf-8", errors="replace")
+    stderr_str = b"".join(stderr_state[0]).decode("utf-8", errors="replace")
+
+    # Overflow takes unconditional precedence over timeout: an observed
+    # overflow can never be misclassified as timeout, which would return
+    # partial data instead of the proper output_limit_exceeded envelope.
+    if stdout_truncated or stderr_truncated:
+        # Never return successful partial data on overflow.
+        return EXIT_OUTPUT_OVERFLOW, "", "", (stdout_truncated, stderr_truncated)
+
+    if timed_out:
+        return EXIT_TIMEOUT, stdout_str, stderr_str, None
+
+    return proc.returncode, stdout_str, stderr_str, None
 
 
 def _run_checked(cmd, scope, action):
     """Run a command; produce JSON envelope on success or the appropriate error."""
-    ec, out, err = _run(cmd)
+    ec, out, err, overflow = _run(cmd)
+    if ec == EXIT_OUTPUT_OVERFLOW:
+        st, se = overflow
+        return _err_overflow(scope, action, st, se), 1
     if ec == EXIT_TIMEOUT:
         msg = (
             f"{action} timed out after 30s — systemctl may be waiting for a "
@@ -171,13 +380,16 @@ def cmd_list(args, scope):
     if state_filter:
         cmd.append(f"--state={state_filter}")
 
-    ec, out, err = _run(cmd)
+    ec, out, err, overflow = _run(cmd)
     if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, "list", "binary_missing",
                      f"Binary not found: {_ctl()}", err), 3
     if ec == EXIT_TIMEOUT:
         return _err(scope, "list", "timeout",
                      f"list-units timed out after 30s", (err or "").strip()), 124
+    if ec == EXIT_OUTPUT_OVERFLOW:
+        st, se = overflow
+        return _err_overflow(scope, "list", st, se), 1
     if ec != 0:
         return _err(scope, "list", "command_failed",
                      f"list-units failed (exit {ec})", err.strip()), 1
@@ -225,7 +437,7 @@ def cmd_list(args, scope):
             uf_cmd.append(f"--type={type_filter}")
         if state_filter:
             uf_cmd.append(f"--state={state_filter}")
-        uf_ec, uf_out, uf_err = _run(uf_cmd)
+        uf_ec, uf_out, uf_err, _overflow = _run(uf_cmd)
         if uf_ec == 0 and uf_out:
             all_files = _parse_unit_files_output(uf_out, type_filter, "")
             loaded_names = {u["name"] for u in units}
@@ -267,13 +479,16 @@ def cmd_list_unit_files(args, scope):
     if state_filter:
         cmd.append(f"--state={state_filter}")
 
-    ec, out, err = _run(cmd)
+    ec, out, err, overflow = _run(cmd)
     if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, "list-unit-files", "binary_missing",
                      f"Binary not found: {_ctl()}", err), 3
     if ec == EXIT_TIMEOUT:
         return _err(scope, "list-unit-files", "timeout",
                      f"list-unit-files timed out after 30s", (err or "").strip()), 124
+    if ec == EXIT_OUTPUT_OVERFLOW:
+        st, se = overflow
+        return _err_overflow(scope, "list-unit-files", st, se), 1
     if ec != 0:
         return _err(scope, "list-unit-files", "command_failed",
                      f"list-unit-files failed (exit {ec})", err.strip()), 1
@@ -403,7 +618,7 @@ def cmd_mutate(action, args, scope):
     if scope == "user":
         cmd.insert(1, "--user")
 
-    ec, out, err = _run(cmd)
+    ec, out, err, overflow = _run(cmd)
     if ec == EXIT_TIMEOUT:
         msg = (
             f"{action} timed out after 30s — systemctl may be waiting for "
@@ -414,6 +629,9 @@ def cmd_mutate(action, args, scope):
     if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, action, "binary_missing",
                      f"Binary not found: {cmd[0]}", err), 3
+    if ec == EXIT_OUTPUT_OVERFLOW:
+        st, se = overflow
+        return _err_overflow(scope, action, st, se), 1
     if ec != 0:
         return _err(scope, action, "command_failed",
                      f"{action} {unit} failed (exit {ec})", (err or "").strip()), 1
@@ -426,7 +644,7 @@ def cmd_daemon_reload(args, scope):
     if scope == "user":
         cmd.insert(1, "--user")
 
-    ec, out, err = _run(cmd)
+    ec, out, err, overflow = _run(cmd)
     if ec == EXIT_TIMEOUT:
         msg = (
             f"daemon-reload timed out after 30s — systemctl may be waiting "
@@ -437,6 +655,9 @@ def cmd_daemon_reload(args, scope):
     if ec == EXIT_NOT_FOUND or ec is None:
         return _err(scope, "daemon-reload", "binary_missing",
                      f"Binary not found: {cmd[0]}", err), 3
+    if ec == EXIT_OUTPUT_OVERFLOW:
+        st, se = overflow
+        return _err_overflow(scope, "daemon-reload", st, se), 1
     if ec != 0:
         return _err(scope, "daemon-reload", "command_failed",
                      f"daemon-reload failed (exit {ec})", err.strip()), 1
@@ -486,13 +707,14 @@ def _polkit_agent_running():
     uid = os.getuid()
 
     # 1. Standalone agent process check.
+    #    Only check the return code — never capture pgrep output.
     try:
         r = subprocess.run(
             ["pgrep", "-u", str(uid), "-f",
              "polkit.*[Aa]uthentication.*[Aa]gent"],
-            capture_output=True, text=True, timeout=2
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
         )
-        if r.returncode == 0 and r.stdout.strip():
+        if r.returncode == 0:
             return True
     except Exception:
         # pgrep not available or failed; fall through.
@@ -519,14 +741,16 @@ def _polkit_agent_running():
 def main():
     args = sys.argv[1:]
     if not args:
-        print(_err(None, "", "usage", "Usage: units.py <command> [args]"), file=sys.stdout)
+        print(_cap_output(
+            _err(None, "", "usage", "Usage: units.py <command> [args]")
+        ))
         sys.exit(2)
 
     cmd = args[0]
 
     if cmd == "diagnose":
         out, ec = cmd_diagnose()
-        print(out)
+        print(_cap_output(out))
         sys.exit(0)
 
     # scope is required for everything except diagnose
@@ -545,7 +769,9 @@ def main():
             i += 1
 
     if scope not in ("user", "system"):
-        print(_err(None, cmd, "usage", "Missing or invalid --scope (user|system)"), file=sys.stdout)
+        print(_cap_output(
+            _err(None, cmd, "usage", "Missing or invalid --scope (user|system)")
+        ))
         sys.exit(2)
 
     if cmd == "list":
@@ -565,10 +791,12 @@ def main():
     elif cmd in MUTATION_ACTIONS:
         out, ec = cmd_mutate(cmd, remaining, scope)
     else:
-        print(_err(scope, cmd, "usage", f"Unknown command: {cmd}"), file=sys.stdout)
+        print(_cap_output(
+            _err(scope, cmd, "usage", f"Unknown command: {cmd}")
+        ))
         sys.exit(2)
 
-    print(out)
+    print(_cap_output(out))
     sys.exit(ec)
 
 

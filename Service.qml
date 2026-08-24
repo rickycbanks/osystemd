@@ -27,6 +27,16 @@ Item {
     property var lastUpdated: null
     property string helperPath: ""
 
+    // ── Helper-to-QML protocol budget (must match units.py JSON_LIMIT) ──
+    readonly property int _jsonCap: 524288       // 512 KiB
+    readonly property int _errorCap: 4096        // retained error text cap
+
+    // ── Set lastError with truncation cap ──────────────────────────────
+    function _setError(msg) {
+        if (!msg) { lastError = ""; return; }
+        lastError = msg.length > _errorCap ? msg.substring(0, _errorCap) : msg;
+    }
+
     // ── Toggle a unit name in the pinned list ────────────────────────
     function togglePin(unitName) {
         var idx = root.pinned.indexOf(unitName);
@@ -161,22 +171,42 @@ Item {
     Process {
         id: listProc
         running: false
-        stdout: StdioCollector {
-            id: listCollector
-            onStreamFinished: {
-                root.busy = false;
-                try {
-                    var envelope = JSON.parse(listCollector.text);
-                    if (envelope.ok) {
-                        root.units = envelope.data.units || [];
-                        root.unloadedUnits = envelope.data.unloaded || [];
-                        root.lastUpdated = new Date();
-                    } else {
-                        root.lastError = envelope.error ? envelope.error.message : "list failed";
-                    }
-                } catch (e) {
-                    root.lastError = "Failed to parse list response";
+        property string _buf: ""
+        property bool _overflow: false
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                if (listProc._overflow) return;
+                listProc._buf += data;
+                if (listProc._buf.length > root._jsonCap) {
+                    listProc._overflow = true;
+                    listProc._buf = "";
+                    listProc.running = false;
+                    root.busy = false;
+                    root._setError("Helper response exceeded the protocol budget");
                 }
+            }
+        }
+        onRunningChanged: {
+            if (!running) {
+                root.busy = false;
+                if (!_overflow && _buf.length > 0) {
+                    try {
+                        var envelope = JSON.parse(_buf);
+                        if (envelope.ok) {
+                            root.units = envelope.data.units || [];
+                            root.unloadedUnits = envelope.data.unloaded || [];
+                            root.lastUpdated = new Date();
+                        } else {
+                            root._setError(envelope.error ? envelope.error.message : "list failed");
+                        }
+                    } catch (e) {
+                        root._setError("Failed to parse list response");
+                    }
+                }
+                _buf = "";
+                _overflow = false;
             }
         }
     }
@@ -186,32 +216,52 @@ Item {
         id: detailProc
         running: false
         property string pendingTab: ""
-        stdout: StdioCollector {
-            id: detailCollector
-            onStreamFinished: {
-                root.busy = false;
-                try {
-                    var envelope = JSON.parse(detailCollector.text);
-                    if (envelope.ok) {
-                        var d = envelope.data || {};
-                        // Merge rather than replace so the Actions tab still
-                        // sees ActiveState (from a prior `status` call) after
-                        // the user visits Unit File (`cat`) — and vice versa.
-                        var merged = Object.assign({}, root.detail, d);
-                        // A `cat` response carries `files`/`raw`; a `status`
-                        // response carries scalar fields. Don't let stale
-                        // `files` from a previous unit leak across selections.
-                        if (detailProc.pendingTab === "status" || detailProc.pendingTab === "show") {
-                            delete merged.files;
-                            delete merged.raw;
-                        }
-                        root.detail = merged;
-                    } else {
-                        root.lastError = envelope.error ? envelope.error.message : "detail failed";
-                    }
-                } catch (e) {
-                    root.lastError = "Failed to parse detail response";
+        property string _buf: ""
+        property bool _overflow: false
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                if (detailProc._overflow) return;
+                detailProc._buf += data;
+                if (detailProc._buf.length > root._jsonCap) {
+                    detailProc._overflow = true;
+                    detailProc._buf = "";
+                    detailProc.running = false;
+                    root.busy = false;
+                    root._setError("Helper response exceeded the protocol budget");
                 }
+            }
+        }
+        onRunningChanged: {
+            if (!running) {
+                root.busy = false;
+                if (!_overflow && _buf.length > 0) {
+                    try {
+                        var envelope = JSON.parse(_buf);
+                        if (envelope.ok) {
+                            var d = envelope.data || {};
+                            // Merge rather than replace so the Actions tab still
+                            // sees ActiveState (from a prior `status` call) after
+                            // the user visits Unit File (`cat`) — and vice versa.
+                            var merged = Object.assign({}, root.detail, d);
+                            // A `cat` response carries `files`/`raw`; a `status`
+                            // response carries scalar fields. Don't let stale
+                            // `files` from a previous unit leak across selections.
+                            if (detailProc.pendingTab === "status" || detailProc.pendingTab === "show") {
+                                delete merged.files;
+                                delete merged.raw;
+                            }
+                            root.detail = merged;
+                        } else {
+                            root._setError(envelope.error ? envelope.error.message : "detail failed");
+                        }
+                    } catch (e) {
+                        root._setError("Failed to parse detail response");
+                    }
+                }
+                _buf = "";
+                _overflow = false;
             }
         }
     }
@@ -220,23 +270,43 @@ Item {
     Process {
         id: journalProc
         running: false
-        stdout: StdioCollector {
-            id: journalCollector
-            onStreamFinished: {
-                root.busy = false;
-                try {
-                    var envelope = JSON.parse(journalCollector.text);
-                    if (envelope.ok) {
-                        var d = envelope.data || {};
-                        root.detail = Object.assign({}, root.detail, {
-                            journal: { lines: d.lines || [] }
-                        });
-                    } else {
-                        root.lastError = envelope.error ? envelope.error.message : "journal failed";
-                    }
-                } catch (e) {
-                    root.lastError = "Failed to parse journal response";
+        property string _buf: ""
+        property bool _overflow: false
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                if (journalProc._overflow) return;
+                journalProc._buf += data;
+                if (journalProc._buf.length > root._jsonCap) {
+                    journalProc._overflow = true;
+                    journalProc._buf = "";
+                    journalProc.running = false;
+                    root.busy = false;
+                    root._setError("Helper response exceeded the protocol budget");
                 }
+            }
+        }
+        onRunningChanged: {
+            if (!running) {
+                root.busy = false;
+                if (!_overflow && _buf.length > 0) {
+                    try {
+                        var envelope = JSON.parse(_buf);
+                        if (envelope.ok) {
+                            var d = envelope.data || {};
+                            root.detail = Object.assign({}, root.detail, {
+                                journal: { lines: d.lines || [] }
+                            });
+                        } else {
+                            root._setError(envelope.error ? envelope.error.message : "journal failed");
+                        }
+                    } catch (e) {
+                        root._setError("Failed to parse journal response");
+                    }
+                }
+                _buf = "";
+                _overflow = false;
             }
         }
     }
@@ -245,20 +315,40 @@ Item {
     Process {
         id: mutateProc
         running: false
-        stdout: StdioCollector {
-            id: mutateCollector
-            onStreamFinished: {
-                root.busy = false;
-                try {
-                    var envelope = JSON.parse(mutateCollector.text);
-                    if (envelope.ok) {
-                        root.refresh();
-                    } else {
-                        root.lastError = envelope.error ? envelope.error.message : "mutate failed";
-                    }
-                } catch (e) {
-                    root.lastError = "Failed to parse mutate response";
+        property string _buf: ""
+        property bool _overflow: false
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                if (mutateProc._overflow) return;
+                mutateProc._buf += data;
+                if (mutateProc._buf.length > root._jsonCap) {
+                    mutateProc._overflow = true;
+                    mutateProc._buf = "";
+                    mutateProc.running = false;
+                    root.busy = false;
+                    root._setError("Helper response exceeded the protocol budget");
                 }
+            }
+        }
+        onRunningChanged: {
+            if (!running) {
+                root.busy = false;
+                if (!_overflow && _buf.length > 0) {
+                    try {
+                        var envelope = JSON.parse(_buf);
+                        if (envelope.ok) {
+                            root.refresh();
+                        } else {
+                            root._setError(envelope.error ? envelope.error.message : "mutate failed");
+                        }
+                    } catch (e) {
+                        root._setError("Failed to parse mutate response");
+                    }
+                }
+                _buf = "";
+                _overflow = false;
             }
         }
     }
@@ -267,17 +357,35 @@ Item {
     Process {
         id: diagnoseProc
         running: false
-        stdout: StdioCollector {
-            id: diagnoseCollector
-            onStreamFinished: {
-                try {
-                    var envelope = JSON.parse(diagnoseCollector.text);
-                    if (envelope.ok) {
-                        root.canElevate = envelope.data.canElevate === true;
-                    }
-                } catch (e) {
-                    // silently ignore — canElevate stays false
+        property string _buf: ""
+        property bool _overflow: false
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                if (diagnoseProc._overflow) return;
+                diagnoseProc._buf += data;
+                if (diagnoseProc._buf.length > root._jsonCap) {
+                    diagnoseProc._overflow = true;
+                    diagnoseProc._buf = "";
+                    diagnoseProc.running = false;
                 }
+            }
+        }
+        onRunningChanged: {
+            if (!running) {
+                if (!_overflow && _buf.length > 0) {
+                    try {
+                        var envelope = JSON.parse(_buf);
+                        if (envelope.ok) {
+                            root.canElevate = envelope.data.canElevate === true;
+                        }
+                    } catch (e) {
+                        // silently ignore — canElevate stays false
+                    }
+                }
+                _buf = "";
+                _overflow = false;
             }
         }
     }
