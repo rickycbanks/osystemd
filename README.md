@@ -60,6 +60,16 @@ Settings are stored as JSON at:
 | `stateFilter`       | list\<string\>   | (active, inactive, failed) | Unit states to show       |
 | `pinned`            | list\<string\>   | `[]`      | Unit names pinned to the top of the list        |
 
+## Release
+
+Releases are tag-driven. Version is defined in `manifest.json` and `units.py` (`__version__`).
+
+1. Bump `manifest.json` and `units.py` to the target version (e.g. `1.1.0`), update tests/README as needed, and merge via PR.
+2. After the version bump is merged, create and push the tag: `git tag v1.1.0 && git push origin v1.1.0`.
+3. Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`: it checks out without persistent credentials, validates the `v`-stripped tag equals `manifest.json` (and helper) version, runs `python -m unittest discover -s tests -v`, and creates a GitHub Release from the already-pushed tag with generated notes (`gh release create --verify-tag`).
+
+Do not create or push the tag until the version-bump PR is approved and merged. The workflow requires `contents: write` only and uses `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` solely for the release step; tag data is passed via environment variables.
+
 ## Screenshots
 
 [<img alt="Cups.Service" src="assets/quickview.png" />]

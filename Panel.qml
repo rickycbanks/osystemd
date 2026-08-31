@@ -154,6 +154,15 @@ Panel {
                             anchors.margins: Style.spacing.panelPadding
                             spacing: Style.spacing.panelPadding
 
+                            // Branding (compact, non-interactive)
+                            Text {
+                                text: "oSystemd"
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.body
+                                font.weight: Font.DemiBold
+                                color: Color.foreground
+                            }
+
                             // Scope toggle
                             Row {
                                 spacing: 4
@@ -228,21 +237,38 @@ Panel {
                                 }
                             }
 
-                            // Settings button (placeholder)
+                            // Clear search (replaces inert gear)
                             Rectangle {
-                                width: 28; height: 28; radius: 4
-                                color: settingsArea.containsMouse ? Color.popups.background : "transparent"
-                                border.color: Color.muted; border.width: 1
+                                id: clearBtn
+                                width: clearText.implicitWidth + 16
+                                height: 28
+                                radius: 4
+                                color: clearArea.containsMouse && clearEnabled ? Color.popups.background : "transparent"
+                                border.color: clearEnabled ? Color.muted : Qt.rgba(0.5, 0.5, 0.5, 0.35)
+                                border.width: 1
+                                opacity: clearEnabled ? 1.0 : 0.5
+                                readonly property bool clearEnabled: root.panelSearch !== ""
                                 Text {
+                                    id: clearText
                                     anchors.centerIn: parent
-                                    text: "\u2699"
-                                    font.pixelSize: Style.font.body
-                                    color: Color.foreground
+                                    text: "Clear"
+                                    font.family: root.contentFontFamily
+                                    font.pixelSize: Style.font.bodySmall
+                                    color: clearBtn.clearEnabled ? Color.foreground : Color.muted
                                 }
                                 MouseArea {
-                                    id: settingsArea
+                                    id: clearArea
                                     anchors.fill: parent
                                     hoverEnabled: true
+                                    enabled: clearBtn.clearEnabled
+                                    onClicked: {
+                                        root.setSearch("");
+                                        root.refresh();
+                                        searchInput.forceActiveFocus();
+                                    }
+                                    ToolTip.visible: clearArea.containsMouse
+                                    ToolTip.delay: 400
+                                    ToolTip.text: clearBtn.clearEnabled ? "Clear search query and refresh" : "Search is empty"
                                 }
                             }
                         }
