@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rickycbanks.osystemd",
   "name": "oSystemd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Ricky Banks",
   "license": "MIT",
   "description": "Manage systemd units from the Omarchy bar. List, inspect, start/stop, enable/disable, mask, and view unit files and journals. Supports user and system scope; system mutations invoke systemctl directly.",

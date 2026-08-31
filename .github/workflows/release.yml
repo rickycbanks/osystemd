@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate tag matches manifest and helper version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG_STRIPPED="${TAG#v}"
+          if ! echo "$TAG_STRIPPED" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Tag $TAG does not match vX.Y.Z" >&2
+            exit 1
+          fi
+          MANIFEST_VER="$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')"
+          HELPER_VER="$(python3 -c 'import units; print(units.__version__)')"
+          echo "Tag: $TAG (stripped: $TAG_STRIPPED)"
+          echo "manifest.json: $MANIFEST_VER"
+          echo "units.py: $HELPER_VER"
+          if [ "$TAG_STRIPPED" != "$MANIFEST_VER" ]; then
+            echo "Tag version $TAG_STRIPPED does not match manifest.json $MANIFEST_VER" >&2
+            exit 1
+          fi
+          if [ "$TAG_STRIPPED" != "$HELPER_VER" ]; then
+            echo "Tag version $TAG_STRIPPED does not match units.py $HELPER_VER" >&2
+            exit 1
+          fi
+          echo "Version validation passed."
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --generate-notes --verify-tag

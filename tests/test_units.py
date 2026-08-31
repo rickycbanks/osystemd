@@ -154,14 +154,28 @@ class TestList(unittest.TestCase):
         self.assertIn("fprintd.service", unloaded_names)
 
     def test_list_unloaded_state_filter(self):
-        data, ec = _run_units("list", "--scope", "system", "--states", "static")
+        # Runtime state filters (active,inactive,failed) must not filter
+        # list-unit-files; static D-Bus units such as fprintd.service must
+        # still appear even when the normal runtime filter is selected.
+        data, ec = _run_units("list", "--scope", "system", "--states", "active,inactive,failed")
         self.assertEqual(ec, 0)
-        # Only static units should appear in unloaded
-        for item in data["data"]["unloaded"]:
-            self.assertEqual(item["fileState"], "static")
         unloaded_names = [u["name"] for u in data["data"]["unloaded"]]
         self.assertIn("fprintd.service", unloaded_names)
-        self.assertIn("cron.service", unloaded_names)
+        # Unloaded must not be narrowed to a single fileState; expect
+        # mixed fileStates because runtime filter is decoupled.
+        file_states = {u["fileState"] for u in data["data"]["unloaded"]}
+        self.assertIn("static", file_states)
+        # Loaded 'enabled' units are excluded from unloaded, but 'disabled'
+        # units remain — proves we didn't filter to only static.
+        self.assertIn("disabled", file_states)
+
+    def test_list_unloaded_runtime_filter_does_not_exclude_static(self):
+        # Using a single runtime state (e.g. failed) must still include
+        # unloaded static units.
+        data, ec = _run_units("list", "--scope", "system", "--states", "failed")
+        self.assertEqual(ec, 0)
+        unloaded_names = [u["name"] for u in data["data"]["unloaded"]]
+        self.assertIn("fprintd.service", unloaded_names)
 
     def test_list_unloaded_does_not_fail_when_list_unit_files_missing(self):
         """list --scope user still returns ok with unloaded=[] if list-unit-files fails."""
@@ -375,7 +389,7 @@ class TestDiagnose(unittest.TestCase):
         d = data["data"]
         self.assertIn("pythonVersion", d)
         self.assertIn("helperVersion", d)
-        self.assertEqual(d["helperVersion"], "0.2.0")
+        self.assertEqual(d["helperVersion"], "1.1.0")
         self.assertIn("systemctl", d)
         self.assertIn("journalctl", d)
         self.assertIn("canElevate", d)

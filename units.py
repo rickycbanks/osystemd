@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-__version__ = "0.2.0"
+__version__ = "1.1.0"
 
 DEFAULT_TYPES = [
     "service", "timer", "socket", "mount",
@@ -428,6 +428,10 @@ def cmd_list(args, scope):
         })
 
     # ── Unloaded units (from list-unit-files) ──────────────────────────
+    # Runtime state filters (active/inactive/failed) apply only to
+    # `list-units`; `list-unit-files` must not receive them so that
+    # D-Bus/static units such as fprintd.service are still discovered
+    # in the system scope while normal runtime filters are selected.
     unloaded = []
     try:
         uf_cmd = [_ctl(), "list-unit-files", "--no-legend", "--plain"]
@@ -435,8 +439,6 @@ def cmd_list(args, scope):
             uf_cmd.append("--user")
         if type_filter:
             uf_cmd.append(f"--type={type_filter}")
-        if state_filter:
-            uf_cmd.append(f"--state={state_filter}")
         uf_ec, uf_out, uf_err, _overflow = _run(uf_cmd)
         if uf_ec == 0 and uf_out:
             all_files = _parse_unit_files_output(uf_out, type_filter, "")
